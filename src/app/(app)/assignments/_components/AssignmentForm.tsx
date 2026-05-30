@@ -25,6 +25,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { createAssignment } from "@/lib/actions/assignments";
 
 // ---- 스키마 ----
 const formSchema = z.object({
@@ -41,7 +42,6 @@ const formSchema = z.object({
 type FormValues = z.infer<typeof formSchema>;
 type Difficulty = "hard" | "medium" | "easy";
 
-// ---- 상수 ----
 const SUBJECTS = [
   "알고리즘",
   "운영체제",
@@ -52,7 +52,6 @@ const SUBJECTS = [
   "기타",
 ];
 
-// data-* Tailwind 스캔 불안정 → 명시적 조건부 클래스로 처리
 const DIFFICULTY_OPTIONS: {
   value: Difficulty;
   label: string;
@@ -79,10 +78,9 @@ const DIFFICULTY_OPTIONS: {
   },
 ];
 
-// ---- 컴포넌트 ----
-export function AssignmentForm() {
+export function AssignmentForm({ onSuccess }: { onSuccess?: () => void }) {
   const [calendarOpen, setCalendarOpen] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
+  const [serverError, setServerError] = useState("");
 
   const {
     register,
@@ -100,13 +98,16 @@ export function AssignmentForm() {
   const selectedDate = watch("dueDate");
 
   const onSubmit = async (data: FormValues) => {
-    // TODO: API 연동 (W3에서 Supabase 연결)
-    console.log("과제 등록:", data);
-    setSubmitted(true);
-    setTimeout(() => {
-      setSubmitted(false);
-      reset();
-    }, 2000);
+    setServerError("");
+    const { error } = await createAssignment(data);
+
+    if (error) {
+      setServerError(error);
+      return;
+    }
+
+    reset();
+    onSuccess?.();
   };
 
   return (
@@ -137,15 +138,11 @@ export function AssignmentForm() {
           control={control}
           render={({ field }) => (
             <Select
-              // value="" 전달 시 hasSelectedValue=true 오동작 → null로 변환
               value={field.value || null}
               onValueChange={(val) => field.onChange(val)}
             >
               <SelectTrigger
-                className={cn(
-                  "w-full",
-                  errors.subject && "border-destructive"
-                )}
+                className={cn("w-full", errors.subject && "border-destructive")}
               >
                 <SelectValue placeholder="과목 선택" />
               </SelectTrigger>
@@ -170,7 +167,6 @@ export function AssignmentForm() {
           마감일 <span className="text-destructive">*</span>
         </Label>
         <Popover open={calendarOpen} onOpenChange={setCalendarOpen}>
-          {/* render prop으로 커스텀 버튼 렌더링 → click 이벤트 안정화 */}
           <PopoverTrigger
             render={
               <button
@@ -238,9 +234,7 @@ export function AssignmentForm() {
           })}
         </div>
         {errors.difficulty && (
-          <p className="text-destructive text-sm">
-            {errors.difficulty.message}
-          </p>
+          <p className="text-destructive text-sm">{errors.difficulty.message}</p>
         )}
       </div>
 
@@ -257,10 +251,7 @@ export function AssignmentForm() {
             max={100}
             step={0.5}
             placeholder="예: 3"
-            className={cn(
-              "pr-12",
-              errors.estimatedHours && "border-destructive"
-            )}
+            className={cn("pr-12", errors.estimatedHours && "border-destructive")}
             {...register("estimatedHours", { valueAsNumber: true })}
           />
           <span className="text-muted-foreground pointer-events-none absolute right-3 text-sm">
@@ -268,19 +259,18 @@ export function AssignmentForm() {
           </span>
         </div>
         {errors.estimatedHours && (
-          <p className="text-destructive text-sm">
-            {errors.estimatedHours.message}
-          </p>
+          <p className="text-destructive text-sm">{errors.estimatedHours.message}</p>
         )}
       </div>
 
-      {/* 제출 버튼 */}
-      <Button
-        type="submit"
-        className="w-full"
-        disabled={isSubmitting || submitted}
-      >
-        {submitted ? "등록 완료!" : isSubmitting ? "등록 중..." : "과제 등록"}
+      {/* 서버 에러 */}
+      {serverError && (
+        <p className="text-destructive text-sm">{serverError}</p>
+      )}
+
+      {/* 제출 */}
+      <Button type="submit" className="w-full" disabled={isSubmitting}>
+        {isSubmitting ? "등록 중..." : "과제 등록"}
       </Button>
     </form>
   );
