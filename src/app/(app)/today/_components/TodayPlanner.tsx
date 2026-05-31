@@ -11,11 +11,13 @@ import {
   Trophy,
   AlertCircle,
   CheckCircle2,
+  Bot,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { recommend, type ScoredAssignment } from "@/lib/priority";
+import { getAIComment } from "@/lib/actions/ai";
 import type { Assignment, Difficulty } from "@/types";
 
 // ---- 상수 ----
@@ -28,25 +30,54 @@ const DIFFICULTY_CONFIG: Record<Difficulty, { label: string; className: string }
 };
 
 const RANK_STYLE = [
-  "bg-yellow-400 text-yellow-900",  // 1위
-  "bg-slate-300 text-slate-800",    // 2위
-  "bg-amber-600 text-amber-50",     // 3위
+  "bg-yellow-400 text-yellow-900",
+  "bg-slate-300 text-slate-800",
+  "bg-amber-600 text-amber-50",
 ];
 
-// ---- 추천 카드 ----
-function RecommendCard({
-  item,
-  rank,
+// ---- AI 코멘트 박스 ----
+function AICommentBox({
+  comment,
+  loading,
+  error,
 }: {
-  item: ScoredAssignment;
-  rank: number;
+  comment: string | null;
+  loading: boolean;
+  error: string | null;
 }) {
+  if (!loading && !comment && !error) return null;
+
+  return (
+    <div className="bg-primary/5 border-primary/20 rounded-xl border p-4">
+      <div className="flex items-center gap-2 mb-2">
+        <Bot className="h-4 w-4 text-primary" />
+        <span className="text-sm font-semibold text-primary">AI 학습 코치</span>
+        <span className="text-muted-foreground text-xs">llama-3.3-70b</span>
+      </div>
+      {loading ? (
+        <div className="space-y-2">
+          <div className="bg-primary/10 h-3 w-full animate-pulse rounded" />
+          <div className="bg-primary/10 h-3 w-4/5 animate-pulse rounded" />
+          <div className="bg-primary/10 h-3 w-3/5 animate-pulse rounded" />
+        </div>
+      ) : error ? (
+        <p className="text-muted-foreground text-sm">{error}</p>
+      ) : (
+        <p className="text-foreground text-sm leading-relaxed whitespace-pre-wrap">
+          {comment}
+        </p>
+      )}
+    </div>
+  );
+}
+
+// ---- 추천 카드 ----
+function RecommendCard({ item, rank }: { item: ScoredAssignment; rank: number }) {
   const diff = DIFFICULTY_CONFIG[item.difficulty];
   const isPartial = item.allocatedHours < item.estimatedHours;
 
   return (
     <div className="bg-card border-border flex gap-4 rounded-xl border p-5 shadow-sm">
-      {/* 순위 뱃지 */}
       <div
         className={cn(
           "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold",
@@ -56,9 +87,7 @@ function RecommendCard({
         {rank}
       </div>
 
-      {/* 내용 */}
       <div className="flex flex-1 flex-col gap-2 min-w-0">
-        {/* 제목 + 난이도 */}
         <div className="flex items-start justify-between gap-2">
           <p className="text-foreground text-sm font-semibold leading-snug">
             {item.title}
@@ -68,19 +97,19 @@ function RecommendCard({
           </Badge>
         </div>
 
-        {/* 메타 */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1">
-            <BookOpen className="h-3.5 w-3.5" />
-            {item.subject}
-          </span>
+          {item.subjectName && (
+            <span className="flex items-center gap-1">
+              <BookOpen className="h-3.5 w-3.5" />
+              {item.subjectName}
+            </span>
+          )}
           <span className="flex items-center gap-1">
             <CalendarDays className="h-3.5 w-3.5" />
             {format(item.dueDate, "M월 d일 (E)", { locale: ko })}
           </span>
         </div>
 
-        {/* 시간 배정 바 */}
         <div className="space-y-1">
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground flex items-center gap-1">
@@ -89,9 +118,7 @@ function RecommendCard({
               <span className="text-foreground font-semibold ml-0.5">
                 {item.allocatedHours}시간
               </span>
-              <span className="text-muted-foreground">
-                / 총 {item.estimatedHours}시간
-              </span>
+              <span className="text-muted-foreground">/ 총 {item.estimatedHours}시간</span>
             </span>
             {isPartial && (
               <span className="text-yellow-600 text-[11px]">부분 작업</span>
@@ -103,14 +130,11 @@ function RecommendCard({
                 "h-full rounded-full transition-all",
                 isPartial ? "bg-yellow-400" : "bg-primary"
               )}
-              style={{
-                width: `${(item.allocatedHours / item.estimatedHours) * 100}%`,
-              }}
+              style={{ width: `${(item.allocatedHours / item.estimatedHours) * 100}%` }}
             />
           </div>
         </div>
 
-        {/* 추천 이유 태그 */}
         {item.reasons.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {item.reasons.map((r) => (
@@ -129,13 +153,7 @@ function RecommendCard({
 }
 
 // ---- 결과 요약 ----
-function Summary({
-  result,
-  available,
-}: {
-  result: ScoredAssignment[];
-  available: number;
-}) {
+function Summary({ result, available }: { result: ScoredAssignment[]; available: number }) {
   const used = result.reduce((s, a) => s + a.allocatedHours, 0);
   const allFit = result.every((a) => a.allocatedHours >= a.estimatedHours);
 
@@ -151,9 +169,7 @@ function Summary({
         <span className="font-semibold">{used}시간</span> 배정 ·{" "}
         <span className="font-semibold">{result.length}개</span> 과제 추천
         {!allFit && (
-          <span className="text-muted-foreground ml-1">
-            (일부 과제는 다음에 이어서)
-          </span>
+          <span className="text-muted-foreground ml-1">(일부 과제는 다음에 이어서)</span>
         )}
       </span>
     </div>
@@ -164,12 +180,33 @@ function Summary({
 export function TodayPlanner({ assignments }: { assignments: Assignment[] }) {
   const [hours, setHours] = useState<number | "">(2);
   const [result, setResult] = useState<ScoredAssignment[] | null>(null);
+  const [aiComment, setAiComment] = useState<string | null>(null);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   const todo = assignments.filter((a) => a.status !== "done");
 
-  const handleRecommend = () => {
+  const handleRecommend = async () => {
     if (!hours || Number(hours) <= 0) return;
-    setResult(recommend(assignments, Number(hours)));
+
+    // 1. 로컬 알고리즘 즉시 실행
+    const recommendations = recommend(assignments, Number(hours));
+    setResult(recommendations);
+
+    // 2. AI 코멘트 비동기 요청
+    setAiComment(null);
+    setAiError(null);
+    setAiLoading(true);
+
+    try {
+      const { comment, error } = await getAIComment(recommendations, Number(hours));
+      setAiComment(comment);
+      setAiError(error);
+    } catch {
+      setAiError("AI 코멘트를 불러오지 못했습니다.");
+    } finally {
+      setAiLoading(false);
+    }
   };
 
   return (
@@ -180,7 +217,6 @@ export function TodayPlanner({ assignments }: { assignments: Assignment[] }) {
           오늘 공부에 쓸 수 있는 시간이 얼마나 되나요?
         </p>
 
-        {/* 퀵 선택 */}
         <div className="mb-4 flex flex-wrap gap-2">
           {QUICK_HOURS.map((h) => (
             <button
@@ -199,7 +235,6 @@ export function TodayPlanner({ assignments }: { assignments: Assignment[] }) {
           ))}
         </div>
 
-        {/* 직접 입력 */}
         <div className="mb-5 flex items-center gap-2">
           <span className="text-muted-foreground text-sm">직접 입력</span>
           <div className="relative flex items-center">
@@ -215,19 +250,21 @@ export function TodayPlanner({ assignments }: { assignments: Assignment[] }) {
               className="border-input bg-background focus:ring-ring h-9 w-24 rounded-lg border px-3 text-sm focus:outline-none focus:ring-2"
               placeholder="0"
             />
-            <span className="text-muted-foreground absolute right-3 text-sm">
-              시간
-            </span>
+            <span className="text-muted-foreground absolute right-3 text-sm">시간</span>
           </div>
         </div>
 
         <Button
           onClick={handleRecommend}
-          disabled={!hours || Number(hours) <= 0 || todo.length === 0}
+          disabled={!hours || Number(hours) <= 0 || todo.length === 0 || aiLoading}
           className="w-full gap-2"
         >
           <Sparkles className="h-4 w-4" />
-          {todo.length === 0 ? "등록된 과제 없음" : "오늘 할 일 추천받기"}
+          {todo.length === 0
+            ? "등록된 과제 없음"
+            : aiLoading
+            ? "AI 분석 중..."
+            : "오늘 할 일 추천받기"}
         </Button>
       </div>
 
@@ -246,6 +283,14 @@ export function TodayPlanner({ assignments }: { assignments: Assignment[] }) {
           ) : (
             <>
               <Summary result={result} available={Number(hours)} />
+
+              {/* AI 코멘트 */}
+              <AICommentBox
+                comment={aiComment}
+                loading={aiLoading}
+                error={aiError}
+              />
+
               <div className="space-y-3">
                 {result.map((item, i) => (
                   <RecommendCard key={item.id} item={item} rank={i + 1} />

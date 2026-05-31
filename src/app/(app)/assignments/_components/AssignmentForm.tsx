@@ -1,12 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
-import { CalendarIcon } from "lucide-react";
+import { CalendarIcon, ImageIcon, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -25,12 +25,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { createAssignment } from "@/lib/actions/assignments";
+import { createAssignment, updateAssignment } from "@/lib/actions/assignments";
+import { parseAssignmentImage } from "@/lib/actions/image-parse";
+import type { Assignment, Subject } from "@/types";
 
-// ---- 스키마 ----
 const formSchema = z.object({
   title: z.string().min(1, "과제명을 입력해주세요"),
-  subject: z.string().min(1, "과목을 선택해주세요"),
+  subjectId: z.string().min(1, "과목을 선택해주세요"),
   dueDate: z.date({ error: "마감일을 선택해주세요" }),
   difficulty: z.enum(["hard", "medium", "easy"] as const),
   estimatedHours: z
@@ -41,16 +42,6 @@ const formSchema = z.object({
 
 type FormValues = z.infer<typeof formSchema>;
 type Difficulty = "hard" | "medium" | "easy";
-
-const SUBJECTS = [
-  "알고리즘",
-  "운영체제",
-  "데이터베이스",
-  "네트워크",
-  "소프트웨어공학",
-  "컴퓨터구조",
-  "기타",
-];
 
 const DIFFICULTY_OPTIONS: {
   value: Difficulty;
@@ -78,9 +69,22 @@ const DIFFICULTY_OPTIONS: {
   },
 ];
 
-export function AssignmentForm({ onSuccess }: { onSuccess?: () => void }) {
+type Props = {
+  subjects: Subject[];
+  assignment?: Assignment; // edit 모드
+  onSuccess?: () => void;
+  onCancel?: () => void;
+};
+
+export function AssignmentForm({ subjects, assignment, onSuccess, onCancel }: Props) {
+  const isEdit = !!assignment;
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [serverError, setServerError] = useState("");
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+  const [parseError, setParseError] = useState("");
+  const [isParsing, startParsing] = useTransition();
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const {
     register,
@@ -92,26 +96,138 @@ export function AssignmentForm({ onSuccess }: { onSuccess?: () => void }) {
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
     resolver: zodResolver(formSchema),
+    defaultValues: isEdit
+      ? {
+          title: assignment.title,
+          subjectId: assignment.subjectId ?? undefined,
+          dueDate: assignment.dueDate,
+          difficulty: assignment.difficulty,
+          estimatedHours: assignment.estimatedHours,
+        }
+      : undefined,
   });
 
   const selectedDifficulty = watch("difficulty");
   const selectedDate = watch("dueDate");
 
+  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setImageFile(file);
+    setImagePreview(URL.createObjectURL(file));
+    setParseError("");
+  }
+
+  function handleImageRemove() {
+    setImageFile(null);
+    setImagePreview(null);
+    setParseError("");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function handleParseImage() {
+    if (!imageFile) return;
+    setParseError("");
+
+    startParsing(async () => {
+      const formData = new FormData();
+      formData.append("image", imageFile);
+      const { data, error } = await parseAssignmentImage(formData);
+
+      if (error) {
+        setParseError(error);
+        return;
+      }
+      if (!data) return;
+
+      setValue("title", data.title, { shouldValidate: true });
+      // AI가 추출한 과목명과 일치하는 subject 찾기
+      const matched = subjects.find((s) =>
+        s.name.toLowerCase().includes(data.subject.toLowerCase()) ||
+        data.subject.toLowerCase().includes(s.name.toLowerCase())
+      );
+      if (matched) setValue("subjectId", matched.id, { shouldValidate: true });
+
+      setValue("difficulty", data.difficulty, { shouldValidate: true });
+      setValue("estimatedHours", data.estimatedHours, { shouldValidate: true });
+      const [y, m, d] = data.dueDate.split("-").map(Number);
+      setValue("dueDate", new Date(y, m - 1, d), { shouldValidate: true });
+    });
+  }
+
   const onSubmit = async (data: FormValues) => {
     setServerError("");
-    const { error } = await createAssignment(data);
 
-    if (error) {
-      setServerError(error);
-      return;
+    if (isEdit) {
+      const { error } = await updateAssignment(assignment.id, data);
+      if (error) { setServerError(error); return; }
+    } else {
+      const { error } = await createAssignment(data);
+      if (error) { setServerError(error); return; }
+      reset();
     }
 
-    reset();
     onSuccess?.();
   };
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      {/* 이미지 업로드 (등록 모드에서만) */}
+      {!isEdit && (
+        <div className="space-y-2">
+          <Label>이미지로 자동 입력 <span className="text-muted-foreground text-xs">(선택)</span></Label>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/jpeg,image/png,image/webp"
+            className="hidden"
+            onChange={handleImageChange}
+          />
+          {!imagePreview ? (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="flex w-full items-center justify-center gap-2 rounded-lg border border-dashed border-input bg-muted/30 py-6 text-sm text-muted-foreground transition-colors hover:bg-muted/50"
+            >
+              <ImageIcon className="h-4 w-4" />
+              과제 캡처 이미지 업로드
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <div className="relative inline-block">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={imagePreview}
+                  alt="업로드된 이미지"
+                  className="h-32 w-auto rounded-lg border object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={handleImageRemove}
+                  className="absolute -right-2 -top-2 rounded-full bg-destructive p-0.5 text-white"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleParseImage}
+                disabled={isParsing}
+              >
+                {isParsing ? (
+                  <><Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />분석 중...</>
+                ) : (
+                  "AI로 자동 입력"
+                )}
+              </Button>
+              {parseError && <p className="text-destructive text-sm">{parseError}</p>}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* 과제명 */}
       <div className="space-y-1.5">
         <Label htmlFor="title">
@@ -130,11 +246,11 @@ export function AssignmentForm({ onSuccess }: { onSuccess?: () => void }) {
 
       {/* 과목 */}
       <div className="space-y-1.5">
-        <Label htmlFor="subject">
+        <Label htmlFor="subjectId">
           과목 <span className="text-destructive">*</span>
         </Label>
         <Controller
-          name="subject"
+          name="subjectId"
           control={control}
           render={({ field }) => (
             <Select
@@ -142,22 +258,28 @@ export function AssignmentForm({ onSuccess }: { onSuccess?: () => void }) {
               onValueChange={(val) => field.onChange(val)}
             >
               <SelectTrigger
-                className={cn("w-full", errors.subject && "border-destructive")}
+                className={cn("w-full", errors.subjectId && "border-destructive")}
               >
                 <SelectValue placeholder="과목 선택" />
               </SelectTrigger>
               <SelectContent>
-                {SUBJECTS.map((s) => (
-                  <SelectItem key={s} value={s}>
-                    {s}
-                  </SelectItem>
-                ))}
+                {subjects.length === 0 ? (
+                  <div className="py-2 text-center text-sm text-muted-foreground">
+                    과목을 먼저 등록해주세요
+                  </div>
+                ) : (
+                  subjects.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.name}
+                    </SelectItem>
+                  ))
+                )}
               </SelectContent>
             </Select>
           )}
         />
-        {errors.subject && (
-          <p className="text-destructive text-sm">{errors.subject.message}</p>
+        {errors.subjectId && (
+          <p className="text-destructive text-sm">{errors.subjectId.message}</p>
         )}
       </div>
 
@@ -263,15 +385,20 @@ export function AssignmentForm({ onSuccess }: { onSuccess?: () => void }) {
         )}
       </div>
 
-      {/* 서버 에러 */}
       {serverError && (
         <p className="text-destructive text-sm">{serverError}</p>
       )}
 
-      {/* 제출 */}
-      <Button type="submit" className="w-full" disabled={isSubmitting}>
-        {isSubmitting ? "등록 중..." : "과제 등록"}
-      </Button>
+      <div className="flex gap-2">
+        {isEdit && (
+          <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>
+            취소
+          </Button>
+        )}
+        <Button type="submit" className="flex-1" disabled={isSubmitting}>
+          {isSubmitting ? (isEdit ? "저장 중..." : "등록 중...") : (isEdit ? "저장" : "과제 등록")}
+        </Button>
+      </div>
     </form>
   );
 }

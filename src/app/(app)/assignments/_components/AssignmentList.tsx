@@ -6,7 +6,7 @@ import { differenceInDays, format } from "date-fns";
 import { ko } from "date-fns/locale";
 import {
   Clock, BookOpen, CalendarDays, AlertCircle,
-  CheckCircle2, CircleDot, Trash2,
+  CheckCircle2, CircleDot, Trash2, Pencil,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -46,7 +46,7 @@ function getDueDateStyle(dueDate: Date): { label: string; className: string } {
 }
 
 // ---- 카드 ----
-function AssignmentCard({ assignment }: { assignment: Assignment }) {
+function AssignmentCard({ assignment, onEdit }: { assignment: Assignment; onEdit: (a: Assignment) => void }) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
 
@@ -95,10 +95,12 @@ function AssignmentCard({ assignment }: { assignment: Assignment }) {
 
       {/* 메타 정보 */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs">
-        <span className="text-muted-foreground flex items-center gap-1">
-          <BookOpen className="h-3.5 w-3.5" />
-          {assignment.subject}
-        </span>
+        {assignment.subjectName && (
+          <span className="text-muted-foreground flex items-center gap-1">
+            <BookOpen className="h-3.5 w-3.5" />
+            {assignment.subjectName}
+          </span>
+        )}
         <span className={cn("flex items-center gap-1", due.className)}>
           <CalendarDays className="h-3.5 w-3.5 shrink-0" />
           {format(assignment.dueDate, "M월 d일 (E)", { locale: ko })}
@@ -129,16 +131,28 @@ function AssignmentCard({ assignment }: { assignment: Assignment }) {
           </span>
         </button>
 
-        {/* 삭제 버튼 */}
-        <button
-          type="button"
-          onClick={handleDelete}
-          disabled={isPending}
-          className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
-          aria-label="삭제"
-        >
-          <Trash2 className="h-3.5 w-3.5" />
-        </button>
+        <div className="flex items-center gap-1">
+          {/* 수정 버튼 */}
+          <button
+            type="button"
+            onClick={() => onEdit(assignment)}
+            disabled={isPending}
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            aria-label="수정"
+          >
+            <Pencil className="h-3.5 w-3.5" />
+          </button>
+          {/* 삭제 버튼 */}
+          <button
+            type="button"
+            onClick={handleDelete}
+            disabled={isPending}
+            className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-red-50 hover:text-red-600"
+            aria-label="삭제"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -160,7 +174,7 @@ function EmptyState() {
 }
 
 // ---- 메인 ----
-export function AssignmentList({ assignments }: { assignments: Assignment[] }) {
+export function AssignmentList({ assignments, onEdit }: { assignments: Assignment[]; onEdit: (a: Assignment) => void }) {
   const sorted = useMemo(
     () => [...assignments].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime()),
     [assignments]
@@ -184,7 +198,7 @@ export function AssignmentList({ assignments }: { assignments: Assignment[] }) {
             마감 임박 ({urgent.length})
           </h3>
           <div className="grid gap-3 sm:grid-cols-2">
-            {urgent.map((a) => <AssignmentCard key={a.id} assignment={a} />)}
+            {urgent.map((a) => <AssignmentCard key={a.id} assignment={a} onEdit={onEdit} />)}
           </div>
         </section>
       )}
@@ -195,7 +209,7 @@ export function AssignmentList({ assignments }: { assignments: Assignment[] }) {
             전체 과제 ({rest.length})
           </h3>
           <div className="grid gap-3 sm:grid-cols-2">
-            {rest.map((a) => <AssignmentCard key={a.id} assignment={a} />)}
+            {rest.map((a) => <AssignmentCard key={a.id} assignment={a} onEdit={onEdit} />)}
           </div>
         </section>
       )}

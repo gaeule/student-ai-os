@@ -6,23 +6,37 @@ import { Plus, List } from "lucide-react";
 import { AssignmentForm } from "./AssignmentForm";
 import { AssignmentList } from "./AssignmentList";
 import { cn } from "@/lib/utils";
-import type { Assignment } from "@/types";
+import type { Assignment, Subject } from "@/types";
 
 type Tab = "list" | "new";
 
-export function AssignmentsContainer({ assignments }: { assignments: Assignment[] }) {
+type Props = {
+  assignments: Assignment[];
+  subjects: Subject[];
+};
+
+export function AssignmentsContainer({ assignments, subjects }: Props) {
   const [tab, setTab] = useState<Tab>("list");
+  const [editingAssignment, setEditingAssignment] = useState<Assignment | null>(null);
   const router = useRouter();
 
-  // 등록 성공: 목록으로 전환 + 서버 데이터 갱신
   function handleFormSuccess() {
     setTab("list");
+    setEditingAssignment(null);
     router.refresh();
+  }
+
+  function handleEdit(assignment: Assignment) {
+    setEditingAssignment(assignment);
+    setTab("list");
+  }
+
+  function handleCancelEdit() {
+    setEditingAssignment(null);
   }
 
   return (
     <>
-      {/* 헤더 + 탭 */}
       <div className="mb-6 flex items-center justify-between">
         <div>
           <h2 className="text-xl font-semibold">과제 관리</h2>
@@ -34,7 +48,7 @@ export function AssignmentsContainer({ assignments }: { assignments: Assignment[
         <div className="bg-muted flex rounded-lg p-1">
           <button
             type="button"
-            onClick={() => setTab("list")}
+            onClick={() => { setTab("list"); setEditingAssignment(null); }}
             className={cn(
               "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
               tab === "list"
@@ -52,7 +66,7 @@ export function AssignmentsContainer({ assignments }: { assignments: Assignment[
           </button>
           <button
             type="button"
-            onClick={() => setTab("new")}
+            onClick={() => { setTab("new"); setEditingAssignment(null); }}
             className={cn(
               "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
               tab === "new"
@@ -66,13 +80,28 @@ export function AssignmentsContainer({ assignments }: { assignments: Assignment[
         </div>
       </div>
 
-      {/* 콘텐츠 */}
-      {tab === "list" ? (
-        <AssignmentList assignments={assignments} />
-      ) : (
+      {tab === "list" && !editingAssignment && (
+        <AssignmentList assignments={assignments} onEdit={handleEdit} />
+      )}
+
+      {tab === "list" && editingAssignment && (
         <div className="mx-auto max-w-xl">
           <div className="bg-card border-border rounded-xl border p-6 shadow-sm">
-            <AssignmentForm onSuccess={handleFormSuccess} />
+            <h3 className="text-base font-semibold mb-4">과제 수정</h3>
+            <AssignmentForm
+              subjects={subjects}
+              assignment={editingAssignment}
+              onSuccess={handleFormSuccess}
+              onCancel={handleCancelEdit}
+            />
+          </div>
+        </div>
+      )}
+
+      {tab === "new" && (
+        <div className="mx-auto max-w-xl">
+          <div className="bg-card border-border rounded-xl border p-6 shadow-sm">
+            <AssignmentForm subjects={subjects} onSuccess={handleFormSuccess} />
           </div>
         </div>
       )}

@@ -13,10 +13,19 @@ export type User = {
 export type Difficulty = "hard" | "medium" | "easy";
 export type AssignmentStatus = "todo" | "in_progress" | "done";
 
+export type Subject = {
+  id: string;
+  name: string;
+  professor: string | null;
+  semester: string | null;
+  createdAt: Date;
+};
+
 export type Assignment = {
   id: string;
   title: string;
-  subject: string;
+  subjectId: string | null;
+  subjectName: string | null;
   dueDate: Date;
   difficulty: Difficulty;
   estimatedHours: number;
