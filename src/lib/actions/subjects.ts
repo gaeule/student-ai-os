@@ -55,6 +55,9 @@ export async function updateSubject(
   input: Pick<Subject, "name" | "professor" | "semester">
 ): Promise<{ error: string | null }> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다" };
+
   const { error } = await supabase
     .from("subjects")
     .update({
@@ -62,7 +65,8 @@ export async function updateSubject(
       professor: input.professor || null,
       semester: input.semester || null,
     })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   if (error) return { error: error.message };
 
@@ -75,10 +79,14 @@ export async function deleteSubject(
   id: string
 ): Promise<{ error: string | null }> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다" };
+
   const { error } = await supabase
     .from("subjects")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   if (error) return { error: error.message };
 

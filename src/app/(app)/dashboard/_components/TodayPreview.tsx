@@ -81,10 +81,12 @@ export function TodayPreview({ assignments }: { assignments: Assignment[] }) {
 
                 {/* 메타 */}
                 <div className="mt-auto space-y-1 text-xs text-muted-foreground">
-                  <span className="flex items-center gap-1">
-                    <BookOpen className="h-3.5 w-3.5 shrink-0" />
-                    {item.subject}
-                  </span>
+                  {item.subjectName && (
+                    <span className="flex items-center gap-1">
+                      <BookOpen className="h-3.5 w-3.5 shrink-0" />
+                      {item.subjectName}
+                    </span>
+                  )}
                   <span className={cn(
                     "flex items-center gap-1",
                     isUrgent && "text-red-500 font-semibold"

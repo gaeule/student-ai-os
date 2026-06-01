@@ -89,10 +89,14 @@ export async function updateAssignmentStatus(
   status: AssignmentStatus
 ): Promise<{ error: string | null }> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다" };
+
   const { error } = await supabase
     .from("assignments")
     .update({ status })
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   if (error) return { error: error.message };
 
@@ -105,10 +109,14 @@ export async function deleteAssignment(
   id: string
 ): Promise<{ error: string | null }> {
   const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { error: "로그인이 필요합니다" };
+
   const { error } = await supabase
     .from("assignments")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .eq("user_id", user.id);
 
   if (error) return { error: error.message };
 

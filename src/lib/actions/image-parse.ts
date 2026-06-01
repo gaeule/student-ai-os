@@ -101,8 +101,25 @@ export async function parseAssignmentImage(
     if (!jsonMatch) return { data: null, error: "AI 응답 파싱 실패" };
 
     const parsed = JSON.parse(jsonMatch[0]) as ParsedAssignment;
+
     if (!parsed.title || !parsed.dueDate)
       return { data: null, error: "과제 정보를 추출하지 못했습니다." };
+
+    // difficulty 검증
+    if (!["easy", "medium", "hard"].includes(parsed.difficulty))
+      parsed.difficulty = "medium";
+
+    // estimatedHours 검증
+    const hours = Number(parsed.estimatedHours);
+    parsed.estimatedHours = isNaN(hours) || hours <= 0 ? 1 : Math.round(hours * 2) / 2;
+
+    // dueDate 형식 + 유효성 검증
+    const dateObj = new Date(parsed.dueDate);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(parsed.dueDate) || isNaN(dateObj.getTime())) {
+      const fallback = new Date();
+      fallback.setDate(fallback.getDate() + 7);
+      parsed.dueDate = fallback.toISOString().split("T")[0];
+    }
 
     return { data: parsed, error: null };
   } catch (e) {

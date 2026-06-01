@@ -12,6 +12,9 @@ import type { Subject } from "@/types";
 export default function SubjectsPage() {
   const router = useRouter();
   const [subjects, setSubjects] = useState<Subject[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [actionError, setActionError] = useState("");
   const [isPending, startTransition] = useTransition();
   const [editingId, setEditingId] = useState<string | null>(null);
 
@@ -28,11 +31,16 @@ export default function SubjectsPage() {
   const [editSemester, setEditSemester] = useState("");
 
   useEffect(() => {
-    getSubjects().then(setSubjects);
+    getSubjects()
+      .then(setSubjects)
+      .catch(() => setLoadError("과목 목록을 불러오지 못했습니다."))
+      .finally(() => setLoading(false));
   }, []);
 
   function refresh() {
-    getSubjects().then(setSubjects);
+    getSubjects()
+      .then(setSubjects)
+      .catch(() => setActionError("목록 갱신에 실패했습니다. 새로고침해주세요."));
     router.refresh();
   }
 
@@ -56,16 +64,21 @@ export default function SubjectsPage() {
 
   function handleUpdate() {
     if (!editingId || !editName.trim()) return;
+    setActionError("");
     startTransition(async () => {
       const { error } = await updateSubject(editingId, { name: editName.trim(), professor: editProfessor || null, semester: editSemester || null });
-      if (!error) { setEditingId(null); refresh(); }
+      if (error) { setActionError(error); return; }
+      setEditingId(null);
+      refresh();
     });
   }
 
   function handleDelete(id: string, name: string) {
     if (!confirm(`"${name}" 과목을 삭제할까요?\n해당 과목의 과제는 과목 정보가 초기화됩니다.`)) return;
+    setActionError("");
     startTransition(async () => {
-      await deleteSubject(id);
+      const { error } = await deleteSubject(id);
+      if (error) { setActionError(error); return; }
       refresh();
     });
   }
@@ -111,8 +124,18 @@ export default function SubjectsPage() {
         </div>
       )}
 
+      {actionError && (
+        <p className="text-destructive text-sm mb-4">{actionError}</p>
+      )}
+
       {/* 과목 목록 */}
-      {subjects.length === 0 ? (
+      {loading ? (
+        <div className="flex justify-center py-20">
+          <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+        </div>
+      ) : loadError ? (
+        <p className="text-destructive text-center py-10 text-sm">{loadError}</p>
+      ) : subjects.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="bg-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
             <BookOpen className="text-muted-foreground h-6 w-6" />
