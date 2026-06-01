@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { differenceInDays, format } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -173,45 +173,91 @@ function EmptyState() {
   );
 }
 
+type FilterTab = "all" | "active" | "done";
+
 // ---- 메인 ----
 export function AssignmentList({ assignments, onEdit }: { assignments: Assignment[]; onEdit: (a: Assignment) => void }) {
+  const [filter, setFilter] = useState<FilterTab>("all");
+
   const sorted = useMemo(
     () => [...assignments].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime()),
     [assignments]
   );
 
-  const urgent = sorted.filter(
+  const filtered = useMemo(() => {
+    if (filter === "active") return sorted.filter((a) => a.status !== "done");
+    if (filter === "done") return sorted.filter((a) => a.status === "done");
+    return sorted;
+  }, [sorted, filter]);
+
+  const activeCnt = sorted.filter((a) => a.status !== "done").length;
+  const doneCnt   = sorted.filter((a) => a.status === "done").length;
+
+  const urgent = filtered.filter(
     (a) => a.status !== "done" && differenceInDays(a.dueDate, new Date()) <= 2
   );
-  const rest = sorted.filter(
+  const rest = filtered.filter(
     (a) => !(a.status !== "done" && differenceInDays(a.dueDate, new Date()) <= 2)
   );
 
-  if (sorted.length === 0) return <EmptyState />;
-
   return (
-    <div className="space-y-6">
-      {urgent.length > 0 && (
-        <section>
-          <h3 className="text-destructive mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
-            <AlertCircle className="h-3.5 w-3.5" />
-            마감 임박 ({urgent.length})
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {urgent.map((a) => <AssignmentCard key={a.id} assignment={a} onEdit={onEdit} />)}
-          </div>
-        </section>
-      )}
+    <div className="space-y-4">
+      {/* 필터 탭 */}
+      <div className="flex gap-1 bg-muted rounded-lg p-1 w-fit">
+        {([
+          { key: "all",    label: "전체",    count: sorted.length },
+          { key: "active", label: "진행 중", count: activeCnt },
+          { key: "done",   label: "완료",    count: doneCnt },
+        ] as { key: FilterTab; label: string; count: number }[]).map(({ key, label, count }) => (
+          <button
+            key={key}
+            type="button"
+            onClick={() => setFilter(key)}
+            className={cn(
+              "flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
+              filter === key
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            {label}
+            <span className={cn(
+              "flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold",
+              filter === key ? "bg-primary text-primary-foreground" : "bg-muted-foreground/20 text-muted-foreground"
+            )}>
+              {count}
+            </span>
+          </button>
+        ))}
+      </div>
 
-      {rest.length > 0 && (
-        <section>
-          <h3 className="text-muted-foreground mb-3 text-xs font-semibold uppercase tracking-wide">
-            전체 과제 ({rest.length})
-          </h3>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {rest.map((a) => <AssignmentCard key={a.id} assignment={a} onEdit={onEdit} />)}
-          </div>
-        </section>
+      {filtered.length === 0 ? (
+        <EmptyState />
+      ) : (
+        <div className="space-y-6">
+          {urgent.length > 0 && (
+            <section>
+              <h3 className="text-destructive mb-3 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide">
+                <AlertCircle className="h-3.5 w-3.5" />
+                마감 임박 ({urgent.length})
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {urgent.map((a) => <AssignmentCard key={a.id} assignment={a} onEdit={onEdit} />)}
+              </div>
+            </section>
+          )}
+
+          {rest.length > 0 && (
+            <section>
+              <h3 className="text-muted-foreground mb-3 text-xs font-semibold uppercase tracking-wide">
+                {filter === "done" ? `완료된 과제 (${rest.length})` : `과제 목록 (${rest.length})`}
+              </h3>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {rest.map((a) => <AssignmentCard key={a.id} assignment={a} onEdit={onEdit} />)}
+              </div>
+            </section>
+          )}
+        </div>
       )}
     </div>
   );

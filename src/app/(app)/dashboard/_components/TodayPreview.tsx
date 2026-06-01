@@ -5,7 +5,7 @@ import { Sparkles, Clock, BookOpen, CalendarDays, ArrowRight } from "lucide-reac
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { recommend } from "@/lib/priority";
-import type { Assignment, Difficulty } from "@/types";
+import type { Assignment, Difficulty, Exam } from "@/types";
 
 const DIFFICULTY_CONFIG: Record<Difficulty, { label: string; className: string }> = {
   hard:   { label: "상", className: "bg-red-100 text-red-700 border-red-200" },
@@ -16,8 +16,8 @@ const DIFFICULTY_CONFIG: Record<Difficulty, { label: string; className: string }
 const DEFAULT_HOURS = 3; // 미리보기용 기본 가용 시간
 const PREVIEW_LIMIT = 3; // 최대 표시 개수
 
-export function TodayPreview({ assignments }: { assignments: Assignment[] }) {
-  const recommended = recommend(assignments, DEFAULT_HOURS).slice(0, PREVIEW_LIMIT);
+export function TodayPreview({ assignments, exams }: { assignments: Assignment[]; exams: Exam[] }) {
+  const recommended = recommend(assignments, exams, DEFAULT_HOURS).slice(0, PREVIEW_LIMIT);
 
   return (
     <section className="space-y-3">

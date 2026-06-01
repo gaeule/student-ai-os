@@ -18,7 +18,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { recommend, type ScoredAssignment } from "@/lib/priority";
 import { getAIComment } from "@/lib/actions/ai";
-import type { Assignment, Difficulty } from "@/types";
+import type { Assignment, Difficulty, Exam } from "@/types";
 
 // ---- 상수 ----
 const QUICK_HOURS = [1, 1.5, 2, 3, 4, 5];
@@ -177,7 +177,7 @@ function Summary({ result, available }: { result: ScoredAssignment[]; available:
 }
 
 // ---- 메인 컴포넌트 ----
-export function TodayPlanner({ assignments }: { assignments: Assignment[] }) {
+export function TodayPlanner({ assignments, exams }: { assignments: Assignment[]; exams: Exam[] }) {
   const [hours, setHours] = useState<number | "">(2);
   const [result, setResult] = useState<ScoredAssignment[] | null>(null);
   const [aiComment, setAiComment] = useState<string | null>(null);
@@ -190,7 +190,7 @@ export function TodayPlanner({ assignments }: { assignments: Assignment[] }) {
     if (!hours || Number(hours) <= 0) return;
 
     // 1. 로컬 알고리즘 즉시 실행
-    const recommendations = recommend(assignments, Number(hours));
+    const recommendations = recommend(assignments, exams, Number(hours));
     setResult(recommendations);
 
     // 2. AI 코멘트 비동기 요청

@@ -18,6 +18,7 @@ export const MOCK_ASSIGNMENTS: Assignment[] = [
     difficulty: "hard",
     estimatedHours: 6,
     status: "in_progress",
+    completedAt: null,
     createdAt: d(-3),
   },
   {
@@ -29,6 +30,7 @@ export const MOCK_ASSIGNMENTS: Assignment[] = [
     difficulty: "medium",
     estimatedHours: 3,
     status: "todo",
+    completedAt: null,
     createdAt: d(-1),
   },
   {
@@ -40,6 +42,7 @@ export const MOCK_ASSIGNMENTS: Assignment[] = [
     difficulty: "medium",
     estimatedHours: 4,
     status: "todo",
+    completedAt: null,
     createdAt: d(-2),
   },
   {
@@ -51,6 +54,7 @@ export const MOCK_ASSIGNMENTS: Assignment[] = [
     difficulty: "hard",
     estimatedHours: 8,
     status: "todo",
+    completedAt: null,
     createdAt: d(-1),
   },
   {
@@ -62,6 +66,7 @@ export const MOCK_ASSIGNMENTS: Assignment[] = [
     difficulty: "easy",
     estimatedHours: 2,
     status: "todo",
+    completedAt: null,
     createdAt: d(0),
   },
 ];

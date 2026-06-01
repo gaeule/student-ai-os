@@ -15,6 +15,7 @@ function fromDb(row: Record<string, unknown>): Assignment {
     difficulty: row.difficulty as Difficulty,
     estimatedHours: Number(row.estimated_hours),
     status: row.status as AssignmentStatus,
+    completedAt: row.completed_at ? new Date(row.completed_at as string) : null,
     createdAt: new Date(row.created_at as string),
   };
 }
@@ -94,7 +95,10 @@ export async function updateAssignmentStatus(
 
   const { error } = await supabase
     .from("assignments")
-    .update({ status })
+    .update({
+      status,
+      completed_at: status === "done" ? new Date().toISOString() : null,
+    })
     .eq("id", id)
     .eq("user_id", user.id);
 

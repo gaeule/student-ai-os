@@ -21,6 +21,19 @@ export type Subject = {
   createdAt: Date;
 };
 
+export type ExamType = "midterm" | "final" | "quiz" | "practical";
+
+export type Exam = {
+  id: string;
+  subjectId: string | null;
+  subjectName: string | null;
+  examType: ExamType;
+  examDate: Date;
+  scope: string | null;
+  prepDays: number;
+  createdAt: Date;
+};
+
 export type Assignment = {
   id: string;
   title: string;
@@ -30,5 +43,6 @@ export type Assignment = {
   difficulty: Difficulty;
   estimatedHours: number;
   status: AssignmentStatus;
+  completedAt: Date | null;
   createdAt: Date;
 };

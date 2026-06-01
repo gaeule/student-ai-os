@@ -1,12 +1,13 @@
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { getAssignments } from "@/lib/actions/assignments";
+import { getExams } from "@/lib/actions/exams";
 import { StatsGrid } from "./_components/StatsGrid";
 import { TodayPreview } from "./_components/TodayPreview";
 import { Separator } from "@/components/ui/separator";
 
 export default async function DashboardPage() {
-  const assignments = await getAssignments();
+  const [assignments, exams] = await Promise.all([getAssignments(), getExams()]);
 
   const now = new Date();
   const greeting = (() => {
@@ -37,7 +38,7 @@ export default async function DashboardPage() {
       <Separator />
 
       {/* 오늘 추천 미리보기 */}
-      <TodayPreview assignments={assignments} />
+      <TodayPreview assignments={assignments} exams={exams} />
     </div>
   );
 }

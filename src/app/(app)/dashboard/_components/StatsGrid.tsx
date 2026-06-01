@@ -23,8 +23,11 @@ function calcStats(assignments: Assignment[]) {
   const done  = assignments.filter((a) => a.status === "done").length;
   const total = assignments.length;
   const rate  = total === 0 ? 0 : Math.round((done / total) * 100);
+  const weekDone = assignments.filter(
+    (a) => a.completedAt && a.completedAt >= weekStart && a.completedAt <= weekEnd
+  ).length;
 
-  return { thisWeek: thisWeek.length, urgent: urgent.length, rate, done, total };
+  return { thisWeek: thisWeek.length, urgent: urgent.length, rate, done, total, weekDone };
 }
 
 // ---- 카드 ----
@@ -99,7 +102,7 @@ function RateCard({ rate, done, total }: { rate: number; done: number; total: nu
 
 // ---- 메인 ----
 export function StatsGrid({ assignments }: { assignments: Assignment[] }) {
-  const { thisWeek, urgent, rate, done, total } = calcStats(assignments);
+  const { thisWeek, urgent, rate, done, total, weekDone } = calcStats(assignments);
 
   const stats: StatItem[] = [
     {
@@ -122,6 +125,15 @@ export function StatsGrid({ assignments }: { assignments: Assignment[] }) {
       accent: urgent > 0,
     },
     {
+      label: "이번 주 완료",
+      value: weekDone,
+      sub: "이번 주 완료한 과제",
+      icon: CheckCircle2,
+      color: weekDone > 0 ? "text-green-600" : "text-muted-foreground",
+      bg: weekDone > 0 ? "bg-green-50" : "bg-muted",
+      border: "border-border",
+    },
+    {
       label: "진행 중",
       value: total - done,
       sub: `전체 ${total}개 중 미완료`,
@@ -133,7 +145,7 @@ export function StatsGrid({ assignments }: { assignments: Assignment[] }) {
   ];
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
       {stats.map((s) => (
         <StatCard key={s.label} item={s} />
       ))}
