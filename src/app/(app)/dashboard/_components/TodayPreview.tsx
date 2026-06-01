@@ -47,7 +47,7 @@ export function TodayPreview({ assignments, exams }: { assignments: Assignment[]
           </p>
         </div>
       ) : (
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 grid-cols-1 sm:grid-cols-3">
           {recommended.map((item, i) => {
             const diff = DIFFICULTY_CONFIG[item.difficulty];
             const daysLabel =

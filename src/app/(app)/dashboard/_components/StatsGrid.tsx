@@ -56,7 +56,7 @@ function StatCard({ item }: { item: StatItem }) {
           <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
             {item.label}
           </p>
-          <p className={cn("mt-1 text-3xl font-bold", item.accent && "text-red-600")}>
+          <p className={cn("mt-1 text-2xl font-bold sm:text-3xl", item.accent && "text-red-600")}>
             {item.value}
           </p>
         </div>
@@ -78,7 +78,7 @@ function RateCard({ rate, done, total }: { rate: number; done: number; total: nu
           <p className="text-muted-foreground text-xs font-medium uppercase tracking-wide">
             완료율
           </p>
-          <p className="mt-1 text-3xl font-bold">{rate}%</p>
+          <p className="mt-1 text-2xl font-bold sm:text-3xl">{rate}%</p>
         </div>
         <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-50">
           <CheckCircle2 className="h-5 w-5 text-green-600" />
@@ -145,7 +145,7 @@ export function StatsGrid({ assignments }: { assignments: Assignment[] }) {
   ];
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-5">
       {stats.map((s) => (
         <StatCard key={s.label} item={s} />
       ))}
