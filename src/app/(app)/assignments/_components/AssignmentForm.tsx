@@ -22,7 +22,6 @@ import {
   SelectContent,
   SelectItem,
   SelectTrigger,
-  SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { createAssignment, updateAssignment } from "@/lib/actions/assignments";
@@ -269,7 +268,11 @@ export function AssignmentForm({ subjects, assignment, onSuccess, onCancel }: Pr
               <SelectTrigger
                 className={cn("w-full", errors.subjectId && "border-destructive")}
               >
-                <SelectValue placeholder="과목 선택" />
+                <span className={!field.value ? "text-muted-foreground" : undefined}>
+                  {field.value
+                    ? (subjects.find((s) => s.id === field.value)?.name ?? "과목 선택")
+                    : "과목 선택"}
+                </span>
               </SelectTrigger>
               <SelectContent>
                 {subjects.length === 0 ? (
@@ -278,7 +281,7 @@ export function AssignmentForm({ subjects, assignment, onSuccess, onCancel }: Pr
                   </div>
                 ) : (
                   subjects.map((s) => (
-                    <SelectItem key={s.id} value={s.id} label={s.name}>
+                    <SelectItem key={s.id} value={s.id}>
                       {s.name}
                     </SelectItem>
                   ))

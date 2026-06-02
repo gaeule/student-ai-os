@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useEffect, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { cn } from "@/lib/utils";
-import { getExams, createExam, updateExam, deleteExam } from "@/lib/actions/exams";
+import { createExam, updateExam, deleteExam } from "@/lib/actions/exams";
 import type { Exam, ExamType, Subject } from "@/types";
 
 const EXAM_TYPE_LABEL: Record<ExamType, string> = {
@@ -160,6 +160,11 @@ export function ExamsClient({
   const router = useRouter();
   const [exams, setExams] = useState<Exam[]>(initialExams);
   const [subjects] = useState<Subject[]>(initialSubjects);
+
+  // router.refresh()로 서버에서 내려온 새 initialExams를 state에 반영
+  useEffect(() => {
+    setExams(initialExams);
+  }, [initialExams]);
   const [actionError, setActionError] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -173,7 +178,6 @@ export function ExamsClient({
   const [editCalendarOpen, setEditCalendarOpen] = useState(false);
 
   function refresh() {
-    getExams().then(setExams).catch(() => setActionError("목록 갱신에 실패했습니다. 새로고침해주세요."));
     router.refresh();
   }
 
@@ -184,7 +188,7 @@ export function ExamsClient({
       const { error } = await createExam({
         subjectId: form.subjectId,
         examType: form.examType,
-        examDate: form.examDate!,
+        examDate: format(form.examDate!, "yyyy-MM-dd"),
         scope: form.scope || null,
         prepDays: form.prepDays,
       });
@@ -213,7 +217,7 @@ export function ExamsClient({
       const { error } = await updateExam(editingId, {
         subjectId: editForm.subjectId,
         examType: editForm.examType,
-        examDate: editForm.examDate!,
+        examDate: format(editForm.examDate!, "yyyy-MM-dd"),
         scope: editForm.scope || null,
         prepDays: editForm.prepDays,
       });

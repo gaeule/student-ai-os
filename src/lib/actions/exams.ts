@@ -29,9 +29,13 @@ export async function getExams(): Promise<Exam[]> {
   return (data ?? []).map(fromDb);
 }
 
-export async function createExam(
-  input: Pick<Exam, "subjectId" | "examType" | "examDate" | "scope" | "prepDays">
-): Promise<{ error: string | null }> {
+export async function createExam(input: {
+  subjectId: string | null;
+  examType: ExamType;
+  examDate: string; // "yyyy-MM-dd" — 클라이언트 로컬 기준 포맷된 문자열
+  scope: string | null;
+  prepDays: number;
+}): Promise<{ error: string | null }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { error: "로그인이 필요합니다" };
@@ -42,7 +46,7 @@ export async function createExam(
       user_id: user.id,
       subject_id: input.subjectId ?? null,
       exam_type: input.examType,
-      exam_date: input.examDate.toISOString().split("T")[0],
+      exam_date: input.examDate,
       scope: input.scope || null,
       prep_days: input.prepDays,
     });
@@ -56,7 +60,13 @@ export async function createExam(
 
 export async function updateExam(
   id: string,
-  input: Pick<Exam, "subjectId" | "examType" | "examDate" | "scope" | "prepDays">
+  input: {
+    subjectId: string | null;
+    examType: ExamType;
+    examDate: string; // "yyyy-MM-dd" — 클라이언트 로컬 기준 포맷된 문자열
+    scope: string | null;
+    prepDays: number;
+  }
 ): Promise<{ error: string | null }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -67,7 +77,7 @@ export async function updateExam(
     .update({
       subject_id: input.subjectId ?? null,
       exam_type: input.examType,
-      exam_date: input.examDate.toISOString().split("T")[0],
+      exam_date: input.examDate,
       scope: input.scope || null,
       prep_days: input.prepDays,
     })
