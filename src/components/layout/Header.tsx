@@ -8,6 +8,8 @@ const pageTitles: Record<string, string> = {
   "/dashboard": "대시보드",
   "/assignments": "과제 관리",
   "/today": "오늘 할 일",
+  "/calendar": "캘린더",
+  "/exams": "시험 일정",
   "/subjects": "과목 관리",
   "/settings": "설정",
 };

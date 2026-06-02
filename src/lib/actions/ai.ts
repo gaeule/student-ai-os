@@ -56,12 +56,12 @@ ${assignmentSummary}
         {
           role: "system",
           content:
-            "너는 대학생 학습 코치야. 과제 상황을 분석해서 오늘 공부 전략을 한국어로 조언해줘. 따뜻하고 실용적인 톤으로, 핵심만 2~3문장으로 짧게 말해.",
+            "너는 대학생 학습 코치야. 반드시 한국어만 사용해. 일본어, 영어, 한자, 외래 문자를 절대 섞지 마. 일본어 표현(まず, では, など 등)은 사용 금지. 과제 상황을 분석해서 오늘 공부 전략을 조언해줘. 따뜻하고 실용적인 톤으로, 핵심만 2~3문장으로 짧게 말해.",
         },
         { role: "user", content: userMessage },
       ],
       max_tokens: 300,
-      temperature: 0.7,
+      temperature: 0.3,
     });
 
     const comment = response.choices[0]?.message?.content ?? null;

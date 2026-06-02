@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import {
@@ -12,13 +13,15 @@ import {
   AlertCircle,
   CheckCircle2,
   Bot,
+  Check,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { recommend, type ScoredAssignment } from "@/lib/priority";
 import { getAIComment } from "@/lib/actions/ai";
-import type { Assignment, Difficulty, Exam } from "@/types";
+import { updateAssignmentStatus } from "@/lib/actions/assignments";
+import type { Assignment, Difficulty, Exam, Schedule } from "@/types";
 
 // ---- 상수 ----
 const QUICK_HOURS = [1, 1.5, 2, 3, 4, 5];
@@ -72,7 +75,17 @@ function AICommentBox({
 }
 
 // ---- 추천 카드 ----
-function RecommendCard({ item, rank }: { item: ScoredAssignment; rank: number }) {
+function RecommendCard({
+  item,
+  rank,
+  completing,
+  onComplete,
+}: {
+  item: ScoredAssignment;
+  rank: number;
+  completing: boolean;
+  onComplete: (id: string) => void;
+}) {
   const diff = DIFFICULTY_CONFIG[item.difficulty];
   const isPartial = item.allocatedHours < item.estimatedHours;
 
@@ -92,9 +105,25 @@ function RecommendCard({ item, rank }: { item: ScoredAssignment; rank: number })
           <p className="text-foreground text-sm font-semibold leading-snug">
             {item.title}
           </p>
-          <Badge variant="outline" className={cn("shrink-0 text-xs", diff.className)}>
-            {diff.label}
-          </Badge>
+          <div className="flex items-center gap-1.5 shrink-0">
+            <Badge variant="outline" className={cn("text-xs", diff.className)}>
+              {diff.label}
+            </Badge>
+            <button
+              type="button"
+              onClick={() => onComplete(item.id)}
+              disabled={completing}
+              title="완료 처리"
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-full border transition-colors",
+                completing
+                  ? "border-green-300 bg-green-50 text-green-400 cursor-wait"
+                  : "border-border text-muted-foreground hover:border-green-400 hover:bg-green-50 hover:text-green-600"
+              )}
+            >
+              <Check className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </div>
 
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
@@ -176,21 +205,83 @@ function Summary({ result, available }: { result: ScoredAssignment[]; available:
   );
 }
 
+// ---- blocked hours 계산 (겹침 병합 포함) ----
+function calcBlockedHours(schedules: Schedule[]): number {
+  const todayStr = format(new Date(), "yyyy-MM-dd");
+
+  const intervals = schedules
+    .filter((s) => {
+      const d = s.date instanceof Date ? s.date : new Date(s.date);
+      return format(d, "yyyy-MM-dd") === todayStr;
+    })
+    .map((s) => {
+      const [sh, sm] = s.startTime.split(":").map(Number);
+      const [eh, em] = s.endTime.split(":").map(Number);
+      return [sh * 60 + sm, eh * 60 + em] as [number, number];
+    })
+    .filter(([start, end]) => end > start)
+    .sort((a, b) => a[0] - b[0]);
+
+  // 겹치는 구간 병합
+  let totalMinutes = 0;
+  let mergedStart = -1;
+  let mergedEnd = -1;
+
+  for (const [start, end] of intervals) {
+    if (mergedEnd < 0 || start > mergedEnd) {
+      if (mergedEnd >= 0) totalMinutes += mergedEnd - mergedStart;
+      mergedStart = start;
+      mergedEnd = end;
+    } else {
+      mergedEnd = Math.max(mergedEnd, end);
+    }
+  }
+  if (mergedEnd >= 0) totalMinutes += mergedEnd - mergedStart;
+
+  return Math.round((totalMinutes / 60) * 10) / 10;
+}
+
 // ---- 메인 컴포넌트 ----
-export function TodayPlanner({ assignments, exams }: { assignments: Assignment[]; exams: Exam[] }) {
+export function TodayPlanner({
+  assignments,
+  exams,
+  schedules,
+}: {
+  assignments: Assignment[];
+  exams: Exam[];
+  schedules: Schedule[];
+}) {
+  const router = useRouter();
+  const [isPending, startTransition] = useTransition();
   const [hours, setHours] = useState<number | "">(2);
+  const blockedHours = calcBlockedHours(schedules);
   const [result, setResult] = useState<ScoredAssignment[] | null>(null);
   const [aiComment, setAiComment] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
+  const [completingId, setCompletingId] = useState<string | null>(null);
 
   const todo = assignments.filter((a) => a.status !== "done");
+
+  function handleComplete(id: string) {
+    setCompletingId(id);
+    startTransition(async () => {
+      const { error } = await updateAssignmentStatus(id, "done");
+      if (!error) {
+        setResult((prev) => prev?.filter((a) => a.id !== id) ?? null);
+        router.refresh();
+      }
+      setCompletingId(null);
+    });
+  }
+
+  const availableHours = Math.max(0, Number(hours || 0) - blockedHours);
 
   const handleRecommend = async () => {
     if (!hours || Number(hours) <= 0) return;
 
-    // 1. 로컬 알고리즘 즉시 실행
-    const recommendations = recommend(assignments, exams, Number(hours));
+    // 1. 로컬 알고리즘 즉시 실행 (고정 일정 차감 후 가용 시간 기준)
+    const recommendations = recommend(assignments, exams, availableHours);
     setResult(recommendations);
 
     // 2. AI 코멘트 비동기 요청
@@ -199,7 +290,7 @@ export function TodayPlanner({ assignments, exams }: { assignments: Assignment[]
     setAiLoading(true);
 
     try {
-      const { comment, error } = await getAIComment(recommendations, Number(hours));
+      const { comment, error } = await getAIComment(recommendations, availableHours);
       setAiComment(comment);
       setAiError(error);
     } catch {
@@ -211,6 +302,22 @@ export function TodayPlanner({ assignments, exams }: { assignments: Assignment[]
 
   return (
     <div className="space-y-8">
+      {/* 오늘 고정 일정 — 자동 차감 배너 */}
+      {blockedHours > 0 && (
+        <div className="bg-violet-50 border-violet-200 rounded-xl border px-4 py-3 text-sm">
+          <div className="flex items-center gap-2">
+            <Clock className="h-4 w-4 shrink-0 text-violet-500" />
+            <span className="text-violet-700 font-medium">오늘 고정 일정 {blockedHours}시간 자동 차감</span>
+          </div>
+          {hours !== "" && Number(hours) > 0 && (
+            <p className="text-violet-600 text-xs mt-1 ml-6">
+              입력 {hours}h - 고정 {blockedHours}h ={" "}
+              <span className="font-semibold">공부 가능 {availableHours}시간</span>으로 추천합니다
+            </p>
+          )}
+        </div>
+      )}
+
       {/* 입력 섹션 */}
       <div className="bg-card border-border rounded-xl border p-6 shadow-sm">
         <p className="text-foreground mb-4 font-medium">
@@ -254,9 +361,14 @@ export function TodayPlanner({ assignments, exams }: { assignments: Assignment[]
           </div>
         </div>
 
+        {hours !== "" && Number(hours) > 0 && availableHours === 0 && (
+          <p className="mb-3 rounded-lg bg-orange-50 border border-orange-200 px-3 py-2 text-xs text-orange-700">
+            고정 일정으로 인해 공부 가능 시간이 0시간입니다. 더 긴 시간을 입력하거나 고정 일정을 확인하세요.
+          </p>
+        )}
         <Button
           onClick={handleRecommend}
-          disabled={!hours || Number(hours) <= 0 || todo.length === 0 || aiLoading}
+          disabled={!hours || Number(hours) <= 0 || availableHours === 0 || todo.length === 0 || aiLoading}
           className="w-full gap-2"
         >
           <Sparkles className="h-4 w-4" />
@@ -282,7 +394,7 @@ export function TodayPlanner({ assignments, exams }: { assignments: Assignment[]
             </div>
           ) : (
             <>
-              <Summary result={result} available={Number(hours)} />
+              <Summary result={result} available={availableHours} />
 
               {/* AI 코멘트 */}
               <AICommentBox
@@ -293,7 +405,13 @@ export function TodayPlanner({ assignments, exams }: { assignments: Assignment[]
 
               <div className="space-y-3">
                 {result.map((item, i) => (
-                  <RecommendCard key={item.id} item={item} rank={i + 1} />
+                  <RecommendCard
+                    key={item.id}
+                    item={item}
+                    rank={i + 1}
+                    completing={completingId === item.id}
+                    onComplete={handleComplete}
+                  />
                 ))}
               </div>
             </>

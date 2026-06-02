@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   FileText,
   CalendarDays,
+  Calendar,
   BookOpen,
   Settings,
   ChevronLeft,
@@ -22,6 +23,7 @@ const navItems = [
   { label: "대시보드", href: "/dashboard", icon: LayoutDashboard },
   { label: "과제", href: "/assignments", icon: FileText },
   { label: "오늘 할 일", href: "/today", icon: CalendarDays },
+  { label: "캘린더", href: "/calendar", icon: Calendar },
   { label: "시험 일정", href: "/exams", icon: GraduationCap },
   { label: "과목", href: "/subjects", icon: BookOpen },
 ] as const;

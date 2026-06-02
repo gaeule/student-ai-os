@@ -106,6 +106,7 @@ export async function updateAssignmentStatus(
 
   revalidatePath("/assignments");
   revalidatePath("/dashboard");
+  revalidatePath("/today");
   return { error: null };
 }
 

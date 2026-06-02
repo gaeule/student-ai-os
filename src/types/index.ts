@@ -34,6 +34,19 @@ export type Exam = {
   createdAt: Date;
 };
 
+export type ScheduleCategory = "수업" | "알바" | "동아리" | "병원" | "약속" | "기타";
+
+export type Schedule = {
+  id: string;
+  title: string;
+  date: Date;
+  startTime: string; // "HH:mm"
+  endTime: string;   // "HH:mm"
+  category: ScheduleCategory;
+  memo: string | null;
+  createdAt: Date;
+};
+
 export type Assignment = {
   id: string;
   title: string;
