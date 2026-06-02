@@ -278,7 +278,7 @@ export function AssignmentForm({ subjects, assignment, onSuccess, onCancel }: Pr
                   </div>
                 ) : (
                   subjects.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
+                    <SelectItem key={s.id} value={s.id} label={s.name}>
                       {s.name}
                     </SelectItem>
                   ))
