@@ -8,6 +8,29 @@ const MAX_RECOMMENDATIONS = 10;
 const MAX_TITLE_LENGTH = 100;
 const MAX_SUBJECT_LENGTH = 50;
 
+/**
+ * LLM 응답에 섞인 일본어 문자(히라가나·가타카나·일본어 구두점)를 제거하고
+ * 제거 후 남는 고립 구두점을 정리합니다.
+ *
+ * 처리 순서:
+ *  1. 일본어 구두점(、。) → 공백 치환 (문장 붙음 방지)
+ *  2. 히라가나(U+3040–309F), 가타카나(U+30A0–30FF) 제거
+ *  3. 구두점 직후 고립 쉼표 정리: "같다.," / "같다. ," → "같다. "
+ *  4. 쉼표 직전 구두점 정리: ",." → ". "
+ *  5. 연속 공백 → 단일 공백
+ *  6. 선두/후미 공백·고립 쉼표 제거
+ */
+function stripJapanese(text: string): string {
+  return text
+    .replace(/[\u3001\u3002]/g, " ")        // 、。→ 공백 (문장 붙음 방지)
+    .replace(/[\u3040-\u309F\u30A0-\u30FF]/g, "")
+    .replace(/([.!?])\s*,+\s*/g, "$1 ")    // "같다.," / "같다. ," → "같다. "
+    .replace(/,+\s*([.!?])/g, " $1")        // ",." → " ."
+    .replace(/\s{2,}/g, " ")
+    .trim()
+    .replace(/^[,]+\s*/, "");               // 선두 고립 쉼표 제거
+}
+
 export async function getAIComment(
   recommendations: ScoredAssignment[],
   availableHours: number
@@ -33,7 +56,11 @@ export async function getAIComment(
   const assignmentSummary = clamped
     .map((a, i) => {
       const diffLabel = { hard: "상", medium: "중", easy: "하" }[a.difficulty];
-      return `${i + 1}. ${a.title} (${a.subjectName ?? "기타"}, 난이도:${diffLabel}, 마감 ${a.daysLeft <= 0 ? "초과" : `${a.daysLeft}일 후`}, 오늘 배정 ${a.allocatedHours}h)`;
+      const dueLabel =
+        a.daysLeft === 0 ? "오늘" :
+        a.daysLeft === 1 ? "내일" :
+        `${a.daysLeft}일 후`;
+      return `${i + 1}. ${a.title} (${a.subjectName ?? "기타"}, 난이도:${diffLabel}, 마감 ${dueLabel}, 오늘 배정 ${a.allocatedHours}h)`;
     })
     .join("\n");
 
@@ -56,7 +83,7 @@ ${assignmentSummary}
         {
           role: "system",
           content:
-            "너는 대학생 학습 코치야. 반드시 한국어만 사용해. 일본어, 영어, 한자, 외래 문자를 절대 섞지 마. 일본어 표현(まず, では, など 등)은 사용 금지. 과제 상황을 분석해서 오늘 공부 전략을 조언해줘. 따뜻하고 실용적인 톤으로, 핵심만 2~3문장으로 짧게 말해.",
+            "You are a Korean university student study coach. CRITICAL: Output ONLY Korean (Hangul). NEVER use Japanese characters (hiragana ぁ-ん, katakana ァ-ン) or Japanese words (まず, では, など, または). Use Korean connectors only: 먼저, 그리고, 또한, 따라서. Analyze the assignments and give a 2~3 sentence study strategy. Warm and practical tone.",
         },
         { role: "user", content: userMessage },
       ],
@@ -64,7 +91,8 @@ ${assignmentSummary}
       temperature: 0.3,
     });
 
-    const comment = response.choices[0]?.message?.content ?? null;
+    const raw = response.choices[0]?.message?.content ?? null;
+    const comment = raw ? stripJapanese(raw) : null;
     return { comment, error: null };
   } catch (e) {
     console.error("[Groq error]", e);

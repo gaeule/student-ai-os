@@ -17,7 +17,7 @@ const DEFAULT_HOURS = 3; // 미리보기용 기본 가용 시간
 const PREVIEW_LIMIT = 3; // 최대 표시 개수
 
 export function TodayPreview({ assignments, exams }: { assignments: Assignment[]; exams: Exam[] }) {
-  const recommended = recommend(assignments, exams, DEFAULT_HOURS).slice(0, PREVIEW_LIMIT);
+  const recommended = recommend(assignments, exams, DEFAULT_HOURS).scheduled.slice(0, PREVIEW_LIMIT);
 
   return (
     <section className="space-y-3">
@@ -51,10 +51,10 @@ export function TodayPreview({ assignments, exams }: { assignments: Assignment[]
           {recommended.map((item, i) => {
             const diff = DIFFICULTY_CONFIG[item.difficulty];
             const daysLabel =
-              item.daysLeft <= 0  ? "마감 초과" :
-              item.daysLeft === 1 ? "오늘 마감" :
+              item.daysLeft === 0 ? "오늘 마감" :
+              item.daysLeft === 1 ? "내일 마감" :
               `${item.daysLeft}일 남음`;
-            const isUrgent = item.daysLeft <= 2;
+            const isUrgent = item.daysLeft <= 1;
 
             return (
               <div

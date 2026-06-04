@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -14,11 +14,12 @@ import {
   CheckCircle2,
   Bot,
   Check,
+  ListTodo,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { recommend, type ScoredAssignment } from "@/lib/priority";
+import { recommend, type ScoredAssignment, type RecommendResult } from "@/lib/priority";
 import { getAIComment } from "@/lib/actions/ai";
 import { updateAssignmentStatus } from "@/lib/actions/assignments";
 import type { Assignment, Difficulty, Exam, Schedule } from "@/types";
@@ -126,6 +127,13 @@ function RecommendCard({
           </div>
         </div>
 
+        {/* 추천 이유 요약 */}
+        {item.prioritySummary && (
+          <p className="text-primary/80 text-xs leading-snug font-medium">
+            {item.prioritySummary}
+          </p>
+        )}
+
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
           {item.subjectName && (
             <span className="flex items-center gap-1">
@@ -205,6 +213,88 @@ function Summary({ result, available }: { result: ScoredAssignment[]; available:
   );
 }
 
+// ---- 오버플로우 플랜 (오늘 시간 부족) ----
+function OverflowPlan({ items }: { items: ScoredAssignment[] }) {
+  return (
+    <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <ListTodo className="h-4 w-4 text-muted-foreground" />
+        <span className="text-sm font-semibold text-muted-foreground">
+          오늘 시간 부족 — 내일 이어서 할 과제
+        </span>
+      </div>
+      <div className="space-y-2">
+        {items.map((item) => (
+          <div
+            key={item.id}
+            className="flex items-start justify-between gap-3 rounded-lg bg-background border border-border px-4 py-3"
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{item.title}</p>
+              <p className="text-xs text-muted-foreground mt-0.5">{item.prioritySummary}</p>
+            </div>
+            <div className="shrink-0 text-right text-xs text-muted-foreground space-y-0.5">
+              {item.allocatedHours > 0 ? (
+                <p>
+                  오늘 {item.allocatedHours}h · 내일{" "}
+                  <span className="font-medium text-foreground">
+                    {item.remainingHours}h
+                  </span>{" "}
+                  남음
+                </p>
+              ) : (
+                <p>{item.remainingHours}시간 필요</p>
+              )}
+              <p>{format(item.dueDate, "M/d (E)", { locale: ko })} 마감</p>
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="text-xs text-muted-foreground pl-1">
+        내일 다시 추천받으면 위 과제가 우선순위에 반영됩니다.
+      </p>
+    </div>
+  );
+}
+
+// ---- 마감 초과 섹션 ----
+function OverduePlan({ items }: { items: ScoredAssignment[] }) {
+  return (
+    <div className="rounded-xl border border-orange-200 bg-orange-50/50 p-4 space-y-3">
+      <div className="flex items-center gap-2">
+        <AlertCircle className="h-4 w-4 text-orange-500" />
+        <span className="text-sm font-semibold text-orange-700">마감이 지난 과제</span>
+      </div>
+      <p className="text-xs text-orange-600 pl-1">
+        추천 시간 배정에서 제외됩니다. 제출 가능 여부를 교수님께 먼저 확인하세요.
+      </p>
+      <div className="space-y-2">
+        {items.map((item) => (
+          <div
+            key={item.id}
+            className="flex items-start justify-between gap-3 rounded-lg bg-background border border-orange-200 px-4 py-3"
+          >
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-foreground truncate">{item.title}</p>
+              {item.subjectName && (
+                <p className="text-xs text-muted-foreground mt-0.5">{item.subjectName}</p>
+              )}
+            </div>
+            <div className="shrink-0 text-right text-xs space-y-0.5">
+              <p className="text-orange-600 font-medium">
+                {Math.abs(item.daysLeft)}일 초과
+              </p>
+              <p className="text-muted-foreground">
+                {format(item.dueDate, "M/d (E)", { locale: ko })} 마감
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ---- blocked hours 계산 (겹침 병합 포함) ----
 function calcBlockedHours(schedules: Schedule[]): number {
   const todayStr = format(new Date(), "yyyy-MM-dd");
@@ -255,27 +345,36 @@ export function TodayPlanner({
   const [, startTransition] = useTransition();
   const [hours, setHours] = useState<number | "">(2);
   const blockedHours = calcBlockedHours(schedules);
-  const [result, setResult] = useState<ScoredAssignment[] | null>(null);
+  const [result, setResult] = useState<RecommendResult | null>(null);
   const [aiComment, setAiComment] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [completingId, setCompletingId] = useState<string | null>(null);
+  // AI 요청 race condition 방지: 최신 요청 ID만 결과 반영
+  const aiRequestId = useRef(0);
 
   const todo = assignments.filter((a) => a.status !== "done");
 
+  const availableHours = Math.max(0, Number(hours || 0) - blockedHours);
+
   function handleComplete(id: string) {
     setCompletingId(id);
+    // 진행 중인 AI 요청 무효화 + 로딩 즉시 해제
+    aiRequestId.current++;
+    setAiLoading(false);
     startTransition(async () => {
       const { error } = await updateAssignmentStatus(id, "done");
       if (!error) {
-        setResult((prev) => prev?.filter((a) => a.id !== id) ?? null);
+        // 완료된 과제 즉시 제외하고 재계산 (props 기반 — router.refresh() 전까지 서버와 잠깐 차이 날 수 있으나 허용 범위)
+        const remaining = assignments.filter((a) => a.id !== id && a.status !== "done");
+        setResult(recommend(remaining, exams, availableHours));
+        setAiComment(null);
+        setAiError(null);
         router.refresh();
       }
       setCompletingId(null);
     });
   }
-
-  const availableHours = Math.max(0, Number(hours || 0) - blockedHours);
 
   const handleRecommend = async () => {
     if (!hours || Number(hours) <= 0) return;
@@ -284,19 +383,27 @@ export function TodayPlanner({
     const recommendations = recommend(assignments, exams, availableHours);
     setResult(recommendations);
 
-    // 2. AI 코멘트 비동기 요청
+    // 2. AI 코멘트 비동기 요청 — 요청 ID 채번
+    const reqId = ++aiRequestId.current;
     setAiComment(null);
     setAiError(null);
     setAiLoading(true);
 
     try {
-      const { comment, error } = await getAIComment(recommendations, availableHours);
-      setAiComment(comment);
-      setAiError(error);
+      const { comment, error } = await getAIComment(recommendations.scheduled, availableHours);
+      // 완료 처리 등으로 더 최신 요청이 생겼으면 이 응답은 버림
+      if (aiRequestId.current === reqId) {
+        setAiComment(comment);
+        setAiError(error);
+      }
     } catch {
-      setAiError("AI 코멘트를 불러오지 못했습니다.");
+      if (aiRequestId.current === reqId) {
+        setAiError("AI 코멘트를 불러오지 못했습니다.");
+      }
     } finally {
-      setAiLoading(false);
+      if (aiRequestId.current === reqId) {
+        setAiLoading(false);
+      }
     }
   };
 
@@ -388,13 +495,13 @@ export function TodayPlanner({
             <h3 className="font-semibold">오늘의 추천 과제</h3>
           </div>
 
-          {result.length === 0 ? (
+          {result.scheduled.length === 0 ? (
             <div className="text-muted-foreground py-10 text-center text-sm">
               추천할 과제가 없습니다.
             </div>
           ) : (
             <>
-              <Summary result={result} available={availableHours} />
+              <Summary result={result.scheduled} available={availableHours} />
 
               {/* AI 코멘트 */}
               <AICommentBox
@@ -404,7 +511,7 @@ export function TodayPlanner({
               />
 
               <div className="space-y-3">
-                {result.map((item, i) => (
+                {result.scheduled.map((item, i) => (
                   <RecommendCard
                     key={item.id}
                     item={item}
@@ -415,6 +522,16 @@ export function TodayPlanner({
                 ))}
               </div>
             </>
+          )}
+
+          {/* 오늘 시간 부족 과제 */}
+          {result.overflow.length > 0 && (
+            <OverflowPlan items={result.overflow} />
+          )}
+
+          {/* 마감 초과 — 별도 확인 필요 */}
+          {result.overdue.length > 0 && (
+            <OverduePlan items={result.overdue} />
           )}
         </div>
       )}
