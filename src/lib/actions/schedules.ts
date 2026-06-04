@@ -4,11 +4,16 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { Schedule, ScheduleCategory } from "@/types";
 
+function parseDateOnly(dateStr: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 function fromDb(row: Record<string, unknown>): Schedule {
   return {
     id: row.id as string,
     title: row.title as string,
-    date: new Date(row.date as string),
+    date: parseDateOnly(row.date as string),
     startTime: (row.start_time as string).slice(0, 5),
     endTime: (row.end_time as string).slice(0, 5),
     category: row.category as ScheduleCategory,

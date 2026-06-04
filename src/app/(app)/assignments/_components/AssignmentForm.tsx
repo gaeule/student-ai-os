@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useForm, Controller } from "react-hook-form";
+import { useForm, useWatch, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { format } from "date-fns";
@@ -90,7 +90,7 @@ export function AssignmentForm({ subjects, assignment, onSuccess, onCancel }: Pr
     handleSubmit,
     control,
     setValue,
-    watch,
+
     reset,
     formState: { errors, isSubmitting },
   } = useForm<FormValues>({
@@ -106,8 +106,8 @@ export function AssignmentForm({ subjects, assignment, onSuccess, onCancel }: Pr
       : undefined,
   });
 
-  const selectedDifficulty = watch("difficulty");
-  const selectedDate = watch("dueDate");
+  const selectedDifficulty = useWatch({ control, name: "difficulty" });
+  const selectedDate = useWatch({ control, name: "dueDate" });
 
   // 언마운트 시 object URL 해제
   useEffect(() => {
@@ -165,12 +165,13 @@ export function AssignmentForm({ subjects, assignment, onSuccess, onCancel }: Pr
 
   const onSubmit = async (data: FormValues) => {
     setServerError("");
+    const input = { ...data, dueDate: format(data.dueDate, "yyyy-MM-dd") };
 
     if (isEdit) {
-      const { error } = await updateAssignment(assignment.id, data);
+      const { error } = await updateAssignment(assignment.id, input);
       if (error) { setServerError(error); return; }
     } else {
-      const { error } = await createAssignment(data);
+      const { error } = await createAssignment(input);
       if (error) { setServerError(error); return; }
       reset();
     }
@@ -270,7 +271,7 @@ export function AssignmentForm({ subjects, assignment, onSuccess, onCancel }: Pr
               >
                 <span className={!field.value ? "text-muted-foreground" : undefined}>
                   {field.value
-                    ? (subjects.find((s) => s.id === field.value)?.name ?? "과목 선택")
+                    ? (subjects.find((s) => s.id === field.value)?.name ?? "알 수 없는 과목")
                     : "과목 선택"}
                 </span>
               </SelectTrigger>

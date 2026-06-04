@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useTransition } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { format } from "date-fns";
 import { ko } from "date-fns/locale";
@@ -158,13 +158,6 @@ export function ExamsClient({
   initialSubjects: Subject[];
 }) {
   const router = useRouter();
-  const [exams, setExams] = useState<Exam[]>(initialExams);
-  const [subjects] = useState<Subject[]>(initialSubjects);
-
-  // router.refresh()로 서버에서 내려온 새 initialExams를 state에 반영
-  useEffect(() => {
-    setExams(initialExams);
-  }, [initialExams]);
   const [actionError, setActionError] = useState("");
   const [isPending, startTransition] = useTransition();
 
@@ -253,7 +246,7 @@ export function ExamsClient({
       {showForm && (
         <div className="bg-card border-border mb-6 rounded-xl border p-5 shadow-sm space-y-4">
           <h3 className="text-sm font-semibold">새 시험</h3>
-          <ExamForm value={form} onChange={setForm} subjects={subjects} calOpen={calendarOpen} setCalOpen={setCalendarOpen} />
+          <ExamForm value={form} onChange={setForm} subjects={initialSubjects}calOpen={calendarOpen} setCalOpen={setCalendarOpen} />
           {formError && <p className="text-destructive text-sm">{formError}</p>}
           <div className="flex gap-2">
             <Button variant="outline" className="flex-1" onClick={() => { setShowForm(false); setForm(DEFAULT_FORM); }}>취소</Button>
@@ -264,7 +257,7 @@ export function ExamsClient({
 
       {actionError && <p className="text-destructive text-sm mb-4">{actionError}</p>}
 
-      {exams.length === 0 ? (
+      {initialExams.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-20 text-center">
           <div className="bg-muted mb-4 flex h-14 w-14 items-center justify-center rounded-full">
             <GraduationCap className="text-muted-foreground h-6 w-6" />
@@ -274,10 +267,10 @@ export function ExamsClient({
         </div>
       ) : (
         <div className="space-y-3">
-          {exams.map((exam) =>
+          {initialExams.map((exam) =>
             editingId === exam.id ? (
               <div key={exam.id} className="bg-card border-border rounded-xl border p-5 shadow-sm space-y-3">
-                <ExamForm value={editForm} onChange={setEditForm} subjects={subjects} calOpen={editCalendarOpen} setCalOpen={setEditCalendarOpen} />
+                <ExamForm value={editForm} onChange={setEditForm} subjects={initialSubjects}calOpen={editCalendarOpen} setCalOpen={setEditCalendarOpen} />
                 <div className="flex gap-2">
                   <Button variant="outline" className="flex-1" onClick={() => setEditingId(null)}>취소</Button>
                   <Button className="flex-1" onClick={handleUpdate} disabled={isPending}>저장</Button>

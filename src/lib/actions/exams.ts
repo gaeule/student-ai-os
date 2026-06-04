@@ -4,6 +4,12 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { Exam, ExamType } from "@/types";
 
+// "yyyy-MM-dd" 문자열을 로컬 자정 기준 Date로 파싱 (new Date("yyyy-MM-dd")는 UTC 기준이라 타임존 오차 발생)
+function parseDateOnly(dateStr: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 function fromDb(row: Record<string, unknown>): Exam {
   const subjects = row.subjects as { name: string } | null;
   return {
@@ -11,7 +17,7 @@ function fromDb(row: Record<string, unknown>): Exam {
     subjectId: (row.subject_id as string | null) ?? null,
     subjectName: subjects?.name ?? null,
     examType: row.exam_type as ExamType,
-    examDate: new Date(row.exam_date as string),
+    examDate: parseDateOnly(row.exam_date as string),
     scope: (row.scope as string | null) ?? null,
     prepDays: Number(row.prep_days ?? 3),
     createdAt: new Date(row.created_at as string),
@@ -55,6 +61,8 @@ export async function createExam(input: {
 
   revalidatePath("/exams");
   revalidatePath("/dashboard");
+  revalidatePath("/calendar");
+  revalidatePath("/today");
   return { error: null };
 }
 
@@ -88,6 +96,8 @@ export async function updateExam(
 
   revalidatePath("/exams");
   revalidatePath("/dashboard");
+  revalidatePath("/calendar");
+  revalidatePath("/today");
   return { error: null };
 }
 
@@ -108,5 +118,7 @@ export async function deleteExam(
 
   revalidatePath("/exams");
   revalidatePath("/dashboard");
+  revalidatePath("/calendar");
+  revalidatePath("/today");
   return { error: null };
 }

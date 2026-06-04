@@ -117,7 +117,7 @@ export function CalendarSection({
   function handleQuickAdd() {
     if (!quickTitle.trim() || !selectedDate) return;
     startTransition(async () => {
-      await createAssignment({ title: quickTitle.trim(), subjectId: null, dueDate: selectedDate, difficulty: "medium", estimatedHours: 2 });
+      await createAssignment({ title: quickTitle.trim(), subjectId: null, dueDate: format(selectedDate, "yyyy-MM-dd"), difficulty: "medium", estimatedHours: 2 });
       setQuickTitle("");
       router.refresh();
     });

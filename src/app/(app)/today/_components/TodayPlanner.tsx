@@ -252,7 +252,7 @@ export function TodayPlanner({
   schedules: Schedule[];
 }) {
   const router = useRouter();
-  const [isPending, startTransition] = useTransition();
+  const [, startTransition] = useTransition();
   const [hours, setHours] = useState<number | "">(2);
   const blockedHours = calcBlockedHours(schedules);
   const [result, setResult] = useState<ScoredAssignment[] | null>(null);

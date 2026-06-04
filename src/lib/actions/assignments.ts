@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import type { Assignment, Difficulty, AssignmentStatus } from "@/types";
 
+function parseDateOnly(dateStr: string): Date {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  return new Date(y, m - 1, d);
+}
+
 function fromDb(row: Record<string, unknown>): Assignment {
   const subjects = row.subjects as { name: string } | null;
   return {
@@ -11,7 +16,7 @@ function fromDb(row: Record<string, unknown>): Assignment {
     title: row.title as string,
     subjectId: (row.subject_id as string | null) ?? null,
     subjectName: subjects?.name ?? null,
-    dueDate: new Date(row.due_date as string),
+    dueDate: parseDateOnly(row.due_date as string),
     difficulty: row.difficulty as Difficulty,
     estimatedHours: Number(row.estimated_hours),
     status: row.status as AssignmentStatus,
@@ -31,9 +36,13 @@ export async function getAssignments(): Promise<Assignment[]> {
   return (data ?? []).map(fromDb);
 }
 
-export async function createAssignment(
-  input: Pick<Assignment, "title" | "subjectId" | "dueDate" | "difficulty" | "estimatedHours">
-): Promise<{ data: Assignment | null; error: string | null }> {
+export async function createAssignment(input: {
+  title: string;
+  subjectId: string | null;
+  dueDate: string; // "yyyy-MM-dd" — 클라이언트 로컬 기준 포맷된 문자열
+  difficulty: Difficulty;
+  estimatedHours: number;
+}): Promise<{ data: Assignment | null; error: string | null }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { data: null, error: "로그인이 필요합니다" };
@@ -44,7 +53,7 @@ export async function createAssignment(
       user_id: user.id,
       title: input.title,
       subject_id: input.subjectId ?? null,
-      due_date: input.dueDate.toISOString().split("T")[0],
+      due_date: input.dueDate,
       difficulty: input.difficulty,
       estimated_hours: input.estimatedHours,
     })
@@ -55,12 +64,20 @@ export async function createAssignment(
 
   revalidatePath("/assignments");
   revalidatePath("/dashboard");
+  revalidatePath("/calendar");
+  revalidatePath("/today");
   return { data: fromDb(data), error: null };
 }
 
 export async function updateAssignment(
   id: string,
-  input: Pick<Assignment, "title" | "subjectId" | "dueDate" | "difficulty" | "estimatedHours">
+  input: {
+    title: string;
+    subjectId: string | null;
+    dueDate: string; // "yyyy-MM-dd" — 클라이언트 로컬 기준 포맷된 문자열
+    difficulty: Difficulty;
+    estimatedHours: number;
+  }
 ): Promise<{ error: string | null }> {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
@@ -71,7 +88,7 @@ export async function updateAssignment(
     .update({
       title: input.title,
       subject_id: input.subjectId ?? null,
-      due_date: input.dueDate.toISOString().split("T")[0],
+      due_date: input.dueDate,
       difficulty: input.difficulty,
       estimated_hours: input.estimatedHours,
     })
@@ -82,6 +99,8 @@ export async function updateAssignment(
 
   revalidatePath("/assignments");
   revalidatePath("/dashboard");
+  revalidatePath("/calendar");
+  revalidatePath("/today");
   return { error: null };
 }
 
@@ -106,6 +125,7 @@ export async function updateAssignmentStatus(
 
   revalidatePath("/assignments");
   revalidatePath("/dashboard");
+  revalidatePath("/calendar");
   revalidatePath("/today");
   return { error: null };
 }
@@ -127,5 +147,7 @@ export async function deleteAssignment(
 
   revalidatePath("/assignments");
   revalidatePath("/dashboard");
+  revalidatePath("/calendar");
+  revalidatePath("/today");
   return { error: null };
 }
