@@ -2,12 +2,19 @@ import { format } from "date-fns";
 import { ko } from "date-fns/locale";
 import { getAssignments } from "@/lib/actions/assignments";
 import { getExams } from "@/lib/actions/exams";
+import { getSchedules } from "@/lib/actions/schedules";
+import { calcBlockedHours } from "@/lib/scheduleUtils";
 import { StatsGrid } from "./_components/StatsGrid";
 import { TodayPreview } from "./_components/TodayPreview";
 import { Separator } from "@/components/ui/separator";
 
 export default async function DashboardPage() {
-  const [assignments, exams] = await Promise.all([getAssignments(), getExams()]);
+  const [assignments, exams, schedules] = await Promise.all([
+    getAssignments(),
+    getExams(),
+    getSchedules(),
+  ]);
+  const blockedHours = calcBlockedHours(schedules);
 
   const now = new Date();
   const greeting = (() => {
@@ -38,7 +45,7 @@ export default async function DashboardPage() {
       <Separator />
 
       {/* 오늘 추천 미리보기 */}
-      <TodayPreview assignments={assignments} exams={exams} />
+      <TodayPreview assignments={assignments} exams={exams} blockedHours={blockedHours} />
     </div>
   );
 }

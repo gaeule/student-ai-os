@@ -2,7 +2,7 @@
 
 import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { format } from "date-fns";
+import { format, differenceInDays } from "date-fns";
 import { ko } from "date-fns/locale";
 import {
   Clock,
@@ -15,17 +15,26 @@ import {
   Bot,
   Check,
   ListTodo,
+  GraduationCap,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { recommend, type ScoredAssignment, type RecommendResult } from "@/lib/priority";
+import { buildDailyPlan, type AssignmentStudyBlock, type ExamStudyBlock, type StudyBlock, type DailyPlanResult, type OverdueAssignment } from "@/lib/studyPlan";
+import { calcBlockedHours } from "@/lib/scheduleUtils";
 import { getAIComment } from "@/lib/actions/ai";
 import { updateAssignmentStatus } from "@/lib/actions/assignments";
 import type { Assignment, Difficulty, Exam, Schedule } from "@/types";
 
 // ---- 상수 ----
 const QUICK_HOURS = [1, 1.5, 2, 3, 4, 5];
+
+function formatMinutes(minutes: number): string {
+  if (minutes < 60) return `${minutes}분`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h}시간` : `${h}시간 ${m}분`;
+}
 
 const DIFFICULTY_CONFIG: Record<Difficulty, { label: string; className: string }> = {
   hard:   { label: "상", className: "bg-red-100 text-red-700 border-red-200" },
@@ -75,20 +84,20 @@ function AICommentBox({
   );
 }
 
-// ---- 추천 카드 ----
+// ---- 추천 카드 (과제) ----
 function RecommendCard({
   item,
   rank,
   completing,
   onComplete,
 }: {
-  item: ScoredAssignment;
+  item: AssignmentStudyBlock;
   rank: number;
   completing: boolean;
   onComplete: (id: string) => void;
 }) {
   const diff = DIFFICULTY_CONFIG[item.difficulty];
-  const isPartial = item.allocatedHours < item.estimatedHours;
+  const isPartial = item.allocatedMinutes < item.requestedMinutes;
 
   return (
     <div className="bg-card border-border flex gap-4 rounded-xl border p-5 shadow-sm">
@@ -112,7 +121,7 @@ function RecommendCard({
             </Badge>
             <button
               type="button"
-              onClick={() => onComplete(item.id)}
+              onClick={() => onComplete(item.assignmentId)}
               disabled={completing}
               title="완료 처리"
               className={cn(
@@ -127,7 +136,6 @@ function RecommendCard({
           </div>
         </div>
 
-        {/* 추천 이유 요약 */}
         {item.prioritySummary && (
           <p className="text-primary/80 text-xs leading-snug font-medium">
             {item.prioritySummary}
@@ -153,9 +161,9 @@ function RecommendCard({
               <Clock className="h-3.5 w-3.5" />
               오늘 배정:{" "}
               <span className="text-foreground font-semibold ml-0.5">
-                {item.allocatedHours}시간
+                {formatMinutes(item.allocatedMinutes)}
               </span>
-              <span className="text-muted-foreground">/ 총 {item.estimatedHours}시간</span>
+              <span className="text-muted-foreground">/ 총 {formatMinutes(item.requestedMinutes)}</span>
             </span>
             {isPartial && (
               <span className="text-yellow-600 text-[11px]">부분 작업</span>
@@ -167,7 +175,7 @@ function RecommendCard({
                 "h-full rounded-full transition-all",
                 isPartial ? "bg-yellow-400" : "bg-primary"
               )}
-              style={{ width: `${(item.allocatedHours / item.estimatedHours) * 100}%` }}
+              style={{ width: `${(item.allocatedMinutes / item.requestedMinutes) * 100}%` }}
             />
           </div>
         </div>
@@ -189,10 +197,80 @@ function RecommendCard({
   );
 }
 
+// ---- 시험 복습 카드 ----
+function ExamStudyCard({ item, rank }: { item: ExamStudyBlock; rank: number }) {
+  const daysLabel =
+    item.daysLeft === 0 ? "오늘 시험" :
+    item.daysLeft === 1 ? "내일 시험" :
+    `${item.daysLeft}일 후 시험`;
+
+  return (
+    <div className="bg-violet-50 border-violet-200 flex gap-4 rounded-xl border p-5 shadow-sm">
+      <div
+        className={cn(
+          "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-sm font-bold",
+          rank <= 3 ? RANK_STYLE[rank - 1] : "bg-violet-200 text-violet-800"
+        )}
+      >
+        {rank}
+      </div>
+
+      <div className="flex flex-1 flex-col gap-2 min-w-0">
+        <div className="flex items-start justify-between gap-2">
+          <p className="text-violet-900 text-sm font-semibold leading-snug">
+            {item.title}
+          </p>
+          <Badge variant="outline" className="text-xs bg-violet-100 text-violet-700 border-violet-300 shrink-0">
+            복습
+          </Badge>
+        </div>
+
+        {item.prioritySummary && (
+          <p className="text-violet-700 text-xs leading-snug font-medium">
+            {item.prioritySummary}
+          </p>
+        )}
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-violet-600">
+          {item.subjectName && (
+            <span className="flex items-center gap-1">
+              <GraduationCap className="h-3.5 w-3.5" />
+              {item.subjectName}
+            </span>
+          )}
+          <span className="flex items-center gap-1">
+            <CalendarDays className="h-3.5 w-3.5" />
+            {format(item.examDate, "M월 d일 (E)", { locale: ko })} · {daysLabel}
+          </span>
+          {item.scope && (
+            <span className="flex items-center gap-1">
+              <BookOpen className="h-3.5 w-3.5" />
+              {item.scope}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-center gap-1 text-xs text-violet-700">
+          <Clock className="h-3.5 w-3.5" />
+          복습 배정:{" "}
+          <span className="font-semibold ml-0.5">{formatMinutes(item.allocatedMinutes)}</span>
+          {item.allocatedMinutes < item.requestedMinutes && (
+            <span className="text-violet-500 ml-1">
+              (권장 {formatMinutes(item.requestedMinutes)})
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ---- 결과 요약 ----
-function Summary({ result, available }: { result: ScoredAssignment[]; available: number }) {
-  const used = result.reduce((s, a) => s + a.allocatedHours, 0);
-  const allFit = result.every((a) => a.allocatedHours >= a.estimatedHours);
+function Summary({ result, available }: { result: StudyBlock[]; available: number }) {
+  const usedMinutes = result.reduce((s, b) => s + b.allocatedMinutes, 0);
+  const allFit = result.every((b) => b.allocatedMinutes >= b.requestedMinutes);
+  const assignCount = result.filter((b) => b.type === "assignment").length;
+  const examCount = result.filter((b) => b.type === "exam").length;
 
   return (
     <div className="bg-muted/50 border-border flex items-center gap-3 rounded-lg border px-4 py-3 text-sm">
@@ -203,10 +281,12 @@ function Summary({ result, available }: { result: ScoredAssignment[]; available:
       )}
       <span>
         <span className="font-semibold">{available}시간</span> 중{" "}
-        <span className="font-semibold">{used}시간</span> 배정 ·{" "}
-        <span className="font-semibold">{result.length}개</span> 과제 추천
+        <span className="font-semibold">{formatMinutes(usedMinutes)}</span> 배정 ·{" "}
+        {assignCount > 0 && <><span className="font-semibold">{assignCount}개</span> 과제</>}
+        {assignCount > 0 && examCount > 0 && " + "}
+        {examCount > 0 && <><span className="font-semibold">{examCount}개</span> 시험 복습</>}
         {!allFit && (
-          <span className="text-muted-foreground ml-1">(일부 과제는 다음에 이어서)</span>
+          <span className="text-muted-foreground ml-1">(일부는 다음에 이어서)</span>
         )}
       </span>
     </div>
@@ -214,51 +294,104 @@ function Summary({ result, available }: { result: ScoredAssignment[]; available:
 }
 
 // ---- 오버플로우 플랜 (오늘 시간 부족) ----
-function OverflowPlan({ items }: { items: ScoredAssignment[] }) {
+function OverflowPlan({ items }: { items: StudyBlock[] }) {
+  const todayExamItems = items.filter((b) => b.type === "exam" && b.daysLeft === 0);
+  const restItems = items.filter((b) => !(b.type === "exam" && b.daysLeft === 0));
+
   return (
-    <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
-      <div className="flex items-center gap-2">
-        <ListTodo className="h-4 w-4 text-muted-foreground" />
-        <span className="text-sm font-semibold text-muted-foreground">
-          오늘 시간 부족 — 내일 이어서 할 과제
-        </span>
-      </div>
-      <div className="space-y-2">
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className="flex items-start justify-between gap-3 rounded-lg bg-background border border-border px-4 py-3"
-          >
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-foreground truncate">{item.title}</p>
-              <p className="text-xs text-muted-foreground mt-0.5">{item.prioritySummary}</p>
-            </div>
-            <div className="shrink-0 text-right text-xs text-muted-foreground space-y-0.5">
-              {item.allocatedHours > 0 ? (
-                <p>
-                  오늘 {item.allocatedHours}h · 내일{" "}
-                  <span className="font-medium text-foreground">
-                    {item.remainingHours}h
-                  </span>{" "}
-                  남음
-                </p>
-              ) : (
-                <p>{item.remainingHours}시간 필요</p>
-              )}
-              <p>{format(item.dueDate, "M/d (E)", { locale: ko })} 마감</p>
-            </div>
+    <div className="space-y-3">
+      {/* 오늘 시험 — 시간 미배정 경고 */}
+      {todayExamItems.length > 0 && (
+        <div className="rounded-xl border border-yellow-200 bg-yellow-50/60 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-4 w-4 text-yellow-600" />
+            <span className="text-sm font-semibold text-yellow-800">
+              오늘 시험 — 복습 시간이 부족합니다
+            </span>
           </div>
-        ))}
-      </div>
-      <p className="text-xs text-muted-foreground pl-1">
-        내일 다시 추천받으면 위 과제가 우선순위에 반영됩니다.
-      </p>
+          <p className="text-xs text-yellow-700 pl-1">
+            가용 시간을 늘리거나, 다른 항목을 줄여 복습 시간을 확보하세요.
+          </p>
+          <div className="space-y-2">
+            {todayExamItems.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-start justify-between gap-3 rounded-lg bg-background border border-yellow-200 px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{item.title}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{item.prioritySummary}</p>
+                </div>
+                <div className="shrink-0 text-right text-xs text-yellow-700 space-y-0.5">
+                  {item.allocatedMinutes > 0 ? (
+                    <p>
+                      오늘 {formatMinutes(item.allocatedMinutes)} 배정 ·{" "}
+                      <span className="font-semibold">{formatMinutes(item.remainingMinutes)} 부족</span>
+                    </p>
+                  ) : (
+                    <p className="font-semibold">권장 {formatMinutes(item.requestedMinutes)} 미배정</p>
+                  )}
+                  {item.type === "exam" && (
+                    <p>{format(item.examDate, "M/d (E)", { locale: ko })} 시험</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 내일 이어서 할 항목 */}
+      {restItems.length > 0 && (
+        <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
+          <div className="flex items-center gap-2">
+            <ListTodo className="h-4 w-4 text-muted-foreground" />
+            <span className="text-sm font-semibold text-muted-foreground">
+              오늘 시간 부족 — 내일 이어서 할 항목
+            </span>
+          </div>
+          <div className="space-y-2">
+            {restItems.map((item) => (
+              <div
+                key={item.id}
+                className="flex items-start justify-between gap-3 rounded-lg bg-background border border-border px-4 py-3"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-medium text-foreground truncate">{item.title}</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">{item.prioritySummary}</p>
+                </div>
+                <div className="shrink-0 text-right text-xs text-muted-foreground space-y-0.5">
+                  {item.allocatedMinutes > 0 ? (
+                    <p>
+                      오늘 {formatMinutes(item.allocatedMinutes)} · 내일{" "}
+                      <span className="font-medium text-foreground">
+                        {formatMinutes(item.remainingMinutes)}
+                      </span>{" "}
+                      남음
+                    </p>
+                  ) : (
+                    <p>{formatMinutes(item.requestedMinutes)} 필요</p>
+                  )}
+                  {item.type === "assignment" ? (
+                    <p>{format(item.dueDate, "M/d (E)", { locale: ko })} 마감</p>
+                  ) : (
+                    <p>{format(item.examDate, "M/d (E)", { locale: ko })} 시험</p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground pl-1">
+            내일 다시 추천받으면 위 항목이 우선순위에 반영됩니다.
+          </p>
+        </div>
+      )}
     </div>
   );
 }
 
 // ---- 마감 초과 섹션 ----
-function OverduePlan({ items }: { items: ScoredAssignment[] }) {
+function OverduePlan({ items }: { items: OverdueAssignment[] }) {
   return (
     <div className="rounded-xl border border-orange-200 bg-orange-50/50 p-4 space-y-3">
       <div className="flex items-center gap-2">
@@ -295,42 +428,6 @@ function OverduePlan({ items }: { items: ScoredAssignment[] }) {
   );
 }
 
-// ---- blocked hours 계산 (겹침 병합 포함) ----
-function calcBlockedHours(schedules: Schedule[]): number {
-  const todayStr = format(new Date(), "yyyy-MM-dd");
-
-  const intervals = schedules
-    .filter((s) => {
-      const d = s.date instanceof Date ? s.date : new Date(s.date);
-      return format(d, "yyyy-MM-dd") === todayStr;
-    })
-    .map((s) => {
-      const [sh, sm] = s.startTime.split(":").map(Number);
-      const [eh, em] = s.endTime.split(":").map(Number);
-      return [sh * 60 + sm, eh * 60 + em] as [number, number];
-    })
-    .filter(([start, end]) => end > start)
-    .sort((a, b) => a[0] - b[0]);
-
-  // 겹치는 구간 병합
-  let totalMinutes = 0;
-  let mergedStart = -1;
-  let mergedEnd = -1;
-
-  for (const [start, end] of intervals) {
-    if (mergedEnd < 0 || start > mergedEnd) {
-      if (mergedEnd >= 0) totalMinutes += mergedEnd - mergedStart;
-      mergedStart = start;
-      mergedEnd = end;
-    } else {
-      mergedEnd = Math.max(mergedEnd, end);
-    }
-  }
-  if (mergedEnd >= 0) totalMinutes += mergedEnd - mergedStart;
-
-  return Math.round((totalMinutes / 60) * 10) / 10;
-}
-
 // ---- 메인 컴포넌트 ----
 export function TodayPlanner({
   assignments,
@@ -345,7 +442,7 @@ export function TodayPlanner({
   const [, startTransition] = useTransition();
   const [hours, setHours] = useState<number | "">(2);
   const blockedHours = calcBlockedHours(schedules);
-  const [result, setResult] = useState<RecommendResult | null>(null);
+  const [result, setResult] = useState<DailyPlanResult | null>(null);
   const [aiComment, setAiComment] = useState<string | null>(null);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -357,6 +454,14 @@ export function TodayPlanner({
 
   const availableHours = Math.max(0, Number(hours || 0) - blockedHours);
 
+  // 실제 복습 블록을 생성할 수 있는 시험이 존재하는지 확인
+  const todayMidnight = new Date();
+  todayMidnight.setHours(0, 0, 0, 0);
+  const hasSchedulableExam = exams.some((e) => {
+    const d = differenceInDays(e.examDate, todayMidnight);
+    return d >= 0 && d <= e.prepDays;
+  });
+
   function handleComplete(id: string) {
     setCompletingId(id);
     // 진행 중인 AI 요청 무효화 + 로딩 즉시 해제
@@ -367,7 +472,7 @@ export function TodayPlanner({
       if (!error) {
         // 완료된 과제 즉시 제외하고 재계산 (props 기반 — router.refresh() 전까지 서버와 잠깐 차이 날 수 있으나 허용 범위)
         const remaining = assignments.filter((a) => a.id !== id && a.status !== "done");
-        setResult(recommend(remaining, exams, availableHours));
+        setResult(buildDailyPlan(remaining, exams, availableHours));
         setAiComment(null);
         setAiError(null);
         router.refresh();
@@ -380,7 +485,7 @@ export function TodayPlanner({
     if (!hours || Number(hours) <= 0) return;
 
     // 1. 로컬 알고리즘 즉시 실행 (고정 일정 차감 후 가용 시간 기준)
-    const recommendations = recommend(assignments, exams, availableHours);
+    const recommendations = buildDailyPlan(assignments, exams, availableHours);
     setResult(recommendations);
 
     // 2. AI 코멘트 비동기 요청 — 요청 ID 채번
@@ -475,12 +580,12 @@ export function TodayPlanner({
         )}
         <Button
           onClick={handleRecommend}
-          disabled={!hours || Number(hours) <= 0 || availableHours === 0 || todo.length === 0 || aiLoading}
+          disabled={!hours || Number(hours) <= 0 || availableHours === 0 || (todo.length === 0 && !hasSchedulableExam) || aiLoading}
           className="w-full gap-2"
         >
           <Sparkles className="h-4 w-4" />
-          {todo.length === 0
-            ? "등록된 과제 없음"
+          {todo.length === 0 && !hasSchedulableExam
+            ? "등록된 과제·시험 없음"
             : aiLoading
             ? "AI 분석 중..."
             : "오늘 할 일 추천받기"}
@@ -492,12 +597,12 @@ export function TodayPlanner({
         <div className="space-y-4">
           <div className="flex items-center gap-2">
             <Trophy className="text-yellow-500 h-5 w-5" />
-            <h3 className="font-semibold">오늘의 추천 과제</h3>
+            <h3 className="font-semibold">오늘의 학습 계획</h3>
           </div>
 
           {result.scheduled.length === 0 ? (
             <div className="text-muted-foreground py-10 text-center text-sm">
-              추천할 과제가 없습니다.
+              추천할 학습 항목이 없습니다.
             </div>
           ) : (
             <>
@@ -511,15 +616,23 @@ export function TodayPlanner({
               />
 
               <div className="space-y-3">
-                {result.scheduled.map((item, i) => (
-                  <RecommendCard
-                    key={item.id}
-                    item={item}
-                    rank={i + 1}
-                    completing={completingId === item.id}
-                    onComplete={handleComplete}
-                  />
-                ))}
+                {result.scheduled.map((item, i) =>
+                  item.type === "assignment" ? (
+                    <RecommendCard
+                      key={item.id}
+                      item={item}
+                      rank={i + 1}
+                      completing={completingId === item.assignmentId}
+                      onComplete={handleComplete}
+                    />
+                  ) : (
+                    <ExamStudyCard
+                      key={item.id}
+                      item={item}
+                      rank={i + 1}
+                    />
+                  )
+                )}
               </div>
             </>
           )}

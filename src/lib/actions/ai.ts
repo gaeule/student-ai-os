@@ -2,7 +2,7 @@
 
 import Groq from "groq-sdk";
 import { createClient } from "@/lib/supabase/server";
-import type { ScoredAssignment } from "@/lib/priority";
+import type { StudyBlock } from "@/lib/studyPlan";
 
 const MAX_RECOMMENDATIONS = 10;
 const MAX_TITLE_LENGTH = 100;
@@ -32,7 +32,7 @@ function stripJapanese(text: string): string {
 }
 
 export async function getAIComment(
-  recommendations: ScoredAssignment[],
+  scheduled: StudyBlock[],
   availableHours: number
 ): Promise<{ comment: string | null; error: string | null }> {
   // [P1] 인증 재확인
@@ -40,36 +40,40 @@ export async function getAIComment(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return { comment: null, error: "로그인이 필요합니다." };
 
-  if (recommendations.length === 0) {
+  if (scheduled.length === 0) {
     return { comment: null, error: null };
   }
 
   // [P1] 입력 길이 제한
-  const clamped = recommendations
-    .slice(0, MAX_RECOMMENDATIONS)
-    .map((a) => ({
-      ...a,
-      title: a.title.slice(0, MAX_TITLE_LENGTH),
-      subjectName: (a.subjectName ?? "").slice(0, MAX_SUBJECT_LENGTH),
-    }));
+  const clamped = scheduled.slice(0, MAX_RECOMMENDATIONS);
 
-  const assignmentSummary = clamped
-    .map((a, i) => {
-      const diffLabel = { hard: "상", medium: "중", easy: "하" }[a.difficulty];
-      const dueLabel =
-        a.daysLeft === 0 ? "오늘" :
-        a.daysLeft === 1 ? "내일" :
-        `${a.daysLeft}일 후`;
-      return `${i + 1}. ${a.title} (${a.subjectName ?? "기타"}, 난이도:${diffLabel}, 마감 ${dueLabel}, 오늘 배정 ${a.allocatedHours}h)`;
+  const blockSummary = clamped
+    .map((block, i) => {
+      const title = block.title.slice(0, MAX_TITLE_LENGTH);
+      const subject = (block.subjectName ?? "기타").slice(0, MAX_SUBJECT_LENGTH);
+      if (block.type === "assignment") {
+        const diffLabel = { hard: "상", medium: "중", easy: "하" }[block.difficulty];
+        const dueLabel =
+          block.daysLeft === 0 ? "오늘" :
+          block.daysLeft === 1 ? "내일" :
+          `${block.daysLeft}일 후`;
+        return `${i + 1}. [과제] ${title} (${subject}, 난이도:${diffLabel}, 마감 ${dueLabel}, 배정 ${block.allocatedMinutes}분)`;
+      } else {
+        const examLabel =
+          block.daysLeft === 0 ? "오늘" :
+          block.daysLeft === 1 ? "내일" :
+          `${block.daysLeft}일 후`;
+        return `${i + 1}. [시험복습] ${title} (시험 ${examLabel}, 복습 배정 ${block.allocatedMinutes}분)`;
+      }
     })
     .join("\n");
 
   const userMessage = `오늘 공부 가능 시간: ${availableHours}시간
 
-추천된 과제 목록:
-${assignmentSummary}
+오늘 추천된 학습 계획:
+${blockSummary}
 
-위 과제들을 어떤 순서로, 어떻게 접근하면 좋을지 오늘 공부 전략을 2~3문장으로 간결하게 조언해줘. 구체적인 팁 위주로.`;
+위 계획을 어떤 순서로, 어떻게 접근하면 좋을지 오늘 공부 전략을 2~3문장으로 간결하게 조언해줘. 구체적인 팁 위주로.`;
 
   // [P1] lazy 생성 — env 미설정 시 모듈 크래시 방지
   const apiKey = process.env.GROQ_API_KEY;
