@@ -1,6 +1,10 @@
 import { differenceInDays } from "date-fns";
 import type { Assignment, Difficulty, Exam, ExamType, AssignmentStatus } from "@/types";
 
+// KST 날짜 문자열 ("yyyy-MM-dd")
+const KST_FORMAT = new Intl.DateTimeFormat("sv", { timeZone: "Asia/Seoul" });
+function toKstDateStr(date: Date): string { return KST_FORMAT.format(date); }
+
 // ============================================================
 // Types
 // ============================================================
@@ -27,7 +31,8 @@ export type AssignmentStudyBlock = {
   difficulty: Difficulty;
   status: AssignmentStatus;
   estimatedHours: number;
-  requestedMinutes: number;
+  actualMinutes: number;     // 지금까지 누적 수행 시간 (분)
+  requestedMinutes: number;  // 남은 시간 (estimatedHours*60 - actualMinutes)
   allocatedMinutes: number;
   remainingMinutes: number;
   reasons: string[];
@@ -56,10 +61,36 @@ export type ExamStudyBlock = {
 
 export type StudyBlock = AssignmentStudyBlock | ExamStudyBlock;
 
+export type FuturePlanBlock = {
+  assignmentId: string;
+  title: string;
+  subjectName: string | null;
+  dueDate: Date;
+  allocatedMinutes: number;
+};
+
+export type FuturePlanItem = {
+  date: Date;
+  dateStr: string;         // KST "yyyy-MM-dd"
+  daysFromToday: number;
+  blocks: FuturePlanBlock[];
+  totalMinutes: number;
+};
+
+export type UnplacedWarning = {
+  assignmentId: string;
+  title: string;
+  dueDate: Date;
+  daysLeft: number;
+  unplacedMinutes: number;
+};
+
 export type DailyPlanResult = {
   scheduled: StudyBlock[];
   overflow: StudyBlock[];
   overdue: OverdueAssignment[];
+  futurePlan: FuturePlanItem[];
+  unplacedWarnings: UnplacedWarning[];
 };
 
 // ============================================================
@@ -202,6 +233,95 @@ function examPrioritySummary(daysToExam: number, examType: ExamType, subjectName
 }
 
 // ============================================================
+// W6: 못 끝낸 작업 자동 재배치
+// ============================================================
+
+/** 날짜별 전체 배치 상한 (분). 과제 10개가 같은 날에 몰리는 것을 방지. */
+const MAX_DAILY_TOTAL_MINUTES = 180;
+
+/**
+ * overflow 과제 블록의 남은 시간을 마감일까지 분산 배치.
+ * - 시험 블록·마감 초과 제외
+ * - 과제별 하루 최대 60분, 날짜 전체 합산 최대 180분
+ * - 10분 단위 내림 (floor) — 표시값과 차감량 일치
+ * - 마감이 가까운 과제 우선
+ * - 마감 전에 다 배치 못하면 unplacedWarnings
+ */
+function buildFuturePlan(
+  overflow: StudyBlock[],
+  today: Date
+): { futurePlan: FuturePlanItem[]; unplacedWarnings: UnplacedWarning[] } {
+  const assignmentBlocks = overflow
+    .filter((b): b is AssignmentStudyBlock => b.type === "assignment" && b.remainingMinutes > 0)
+    .sort((a, b) => a.daysLeft - b.daysLeft);
+
+  const dayMap = new Map<string, FuturePlanItem>();
+  const unplacedWarnings: UnplacedWarning[] = [];
+
+  for (const block of assignmentBlocks) {
+    let remaining = block.remainingMinutes;
+    const dueDaysLeft = block.daysLeft;
+
+    if (dueDaysLeft <= 0) {
+      unplacedWarnings.push({
+        assignmentId: block.assignmentId,
+        title: block.title,
+        dueDate: block.dueDate,
+        daysLeft: block.daysLeft,
+        unplacedMinutes: remaining,
+      });
+      continue;
+    }
+
+    for (let dayOffset = 1; dayOffset <= dueDaysLeft && remaining > 0; dayOffset++) {
+      const date = new Date(today);
+      date.setDate(date.getDate() + dayOffset);
+      const dateStr = toKstDateStr(date);
+
+      // 날짜별 전체 상한 확인
+      const existingTotal = dayMap.get(dateStr)?.totalMinutes ?? 0;
+      const dayAvailable = Math.max(0, MAX_DAILY_TOTAL_MINUTES - existingTotal);
+
+      // 과제별 60분, 날짜 전체 상한, 남은 시간 중 최솟값
+      const toAllocate = Math.min(60, remaining, dayAvailable);
+      if (toAllocate < 10) continue; // 이 날엔 블록을 추가할 수 없음
+
+      // P3: floor로 내림 — 표시값 = 차감량 (오버버짓 없음)
+      const allocatedMinutes = Math.floor(toAllocate / 10) * 10;
+      remaining -= allocatedMinutes;
+
+      if (!dayMap.has(dateStr)) {
+        dayMap.set(dateStr, { date, dateStr, daysFromToday: dayOffset, blocks: [], totalMinutes: 0 });
+      }
+      const dayItem = dayMap.get(dateStr)!;
+      dayItem.blocks.push({
+        assignmentId: block.assignmentId,
+        title: block.title,
+        subjectName: block.subjectName,
+        dueDate: block.dueDate,
+        allocatedMinutes,
+      });
+      dayItem.totalMinutes += allocatedMinutes;
+    }
+
+    if (remaining > 0) {
+      unplacedWarnings.push({
+        assignmentId: block.assignmentId,
+        title: block.title,
+        dueDate: block.dueDate,
+        daysLeft: block.daysLeft,
+        unplacedMinutes: remaining,
+      });
+    }
+  }
+
+  const futurePlan = Array.from(dayMap.values()).sort(
+    (a, b) => a.date.getTime() - b.date.getTime()
+  );
+  return { futurePlan, unplacedWarnings };
+}
+
+// ============================================================
 // Main entry point
 // ============================================================
 
@@ -210,8 +330,10 @@ export function buildDailyPlan(
   exams: Exam[],
   availableHours: number
 ): DailyPlanResult {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  // KST 기준 오늘 자정 — Vercel(UTC)에서도 한국 날짜 기준으로 계산
+  const kstDateStr = KST_FORMAT.format(new Date()); // "yyyy-MM-dd" in KST
+  const [ky, km, kd] = kstDateStr.split("-").map(Number);
+  const today = new Date(ky, km - 1, kd); // 로컬 자정으로 생성 (differenceInDays 기준점)
   const availableMinutes = Math.round(availableHours * 60);
 
   // ---- 마감 초과 분리 ----
@@ -232,7 +354,12 @@ export function buildDailyPlan(
   // ---- 활성 과제 → AssignmentStudyBlock ----
   const assignmentBlocks: AssignmentStudyBlock[] = nonDone
     .filter((a) => differenceInDays(a.dueDate, today) >= 0)
-    .map((a) => {
+    .flatMap((a) => {
+      const totalMinutes = Math.round(a.estimatedHours * 60);
+      const isOverEstimate = a.actualMinutes >= totalMinutes;
+      // 최소 10분은 유지 — 제외 기준은 status === "done"만
+      const requestedMinutes = Math.max(10, totalMinutes - a.actualMinutes);
+
       const daysLeft = differenceInDays(a.dueDate, today);
       const bucket = assignmentBucket(daysLeft);
       const { effectiveUrgency, label: conflictLabel } = examConflictForAssignment(daysLeft, exams, today);
@@ -249,9 +376,10 @@ export function buildDailyPlan(
       if (conflictLabel) reasons.push(conflictLabel);
       if (a.difficulty === "hard") reasons.push("난이도 높음");
       if (a.estimatedHours <= 1.5) reasons.push("단기 완료 가능");
+      if (isOverEstimate) reasons.push("예상 시간 초과 · 완료 여부 확인 필요");
+      else if (a.actualMinutes > 0) reasons.push(`${a.actualMinutes}분 진행됨`);
 
-      const requestedMinutes = Math.round(a.estimatedHours * 60);
-      return {
+      return [{
         type: "assignment" as const,
         id: a.id,
         assignmentId: a.id,
@@ -262,6 +390,7 @@ export function buildDailyPlan(
         difficulty: a.difficulty,
         status: a.status,
         estimatedHours: a.estimatedHours,
+        actualMinutes: a.actualMinutes,
         requestedMinutes,
         allocatedMinutes: 0,
         remainingMinutes: requestedMinutes,
@@ -269,7 +398,7 @@ export function buildDailyPlan(
         prioritySummary: assignmentPrioritySummary(daysLeft, a.difficulty, conflictLabel, a.estimatedHours),
         bucket,
         score,
-      };
+      }];
     });
 
   // ---- 시험 복습 블록 생성 ----
@@ -350,6 +479,10 @@ export function buildDailyPlan(
 
   // 부분 배정 항목도 내일 플랜에 포함
   const partialOverflow = scheduled.filter((b) => b.allocatedMinutes < b.requestedMinutes);
+  const finalOverflow = [...partialOverflow, ...overflow];
 
-  return { scheduled, overflow: [...partialOverflow, ...overflow], overdue };
+  // W6: 못 끝낸 과제 자동 재배치
+  const { futurePlan, unplacedWarnings } = buildFuturePlan(finalOverflow, today);
+
+  return { scheduled, overflow: finalOverflow, overdue, futurePlan, unplacedWarnings };
 }

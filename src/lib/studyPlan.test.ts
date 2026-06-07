@@ -18,6 +18,7 @@ const baseAssignment: Assignment = {
   dueDate: daysFromNow(3),
   difficulty: "medium",
   estimatedHours: 1,
+  actualMinutes: 0,
   status: "todo",
   completedAt: null,
   createdAt: new Date(),
@@ -179,5 +180,126 @@ describe("buildDailyPlan", () => {
     // 시험 블록은 scheduled 또는 overflow에 있어야 함
     const allBlocks = [...result.scheduled, ...result.overflow];
     expect(allBlocks.filter((b) => b.type === "exam").length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// ============================================================
+// W6: buildFuturePlan (buildDailyPlan 통해 검증)
+// ============================================================
+describe("W6 futurePlan", () => {
+
+  it("1. overflow 없으면 futurePlan이 비어있다", () => {
+    // 가용 시간 충분 → overflow 없음
+    const result = buildDailyPlan([baseAssignment], [], 10);
+    expect(result.futurePlan).toHaveLength(0);
+    expect(result.unplacedWarnings).toHaveLength(0);
+  });
+
+  it("2. daysLeft=1 과제 remainingMinutes=60 → 내일(day+1) 60분 배정", () => {
+    // 가용 시간 0 → 과제가 overflow로, remainingMinutes=60
+    const a: Assignment = { ...baseAssignment, id: "a2", dueDate: daysFromNow(1), estimatedHours: 1 };
+    const result = buildDailyPlan([a], [], 0);
+    expect(result.futurePlan).toHaveLength(1);
+    expect(result.futurePlan[0].daysFromToday).toBe(1);
+    const block = result.futurePlan[0].blocks[0];
+    expect(block.assignmentId).toBe("a2");
+    expect(block.allocatedMinutes).toBeGreaterThanOrEqual(10);
+  });
+
+  it("3. daysLeft=3 과제 remainingMinutes=180 → 3일에 60분씩 분산", () => {
+    const a: Assignment = { ...baseAssignment, id: "a3", dueDate: daysFromNow(3), estimatedHours: 3 };
+    const result = buildDailyPlan([a], [], 0);
+    expect(result.futurePlan).toHaveLength(3);
+    const total = result.futurePlan.reduce((s, d) => s + d.totalMinutes, 0);
+    // 각 날 60분씩 = 180분 (반올림 오차 허용)
+    expect(total).toBeGreaterThanOrEqual(170);
+    expect(total).toBeLessThanOrEqual(190);
+    result.futurePlan.forEach((d) => {
+      expect(d.blocks[0].allocatedMinutes).toBeLessThanOrEqual(60);
+    });
+  });
+
+  it("4. 하루 최대 60분/과제 제한이 적용된다", () => {
+    // estimatedHours=2 (120분), 가용 0 → remainingMinutes=120, daysLeft=5
+    const a: Assignment = { ...baseAssignment, id: "a4", dueDate: daysFromNow(5), estimatedHours: 2 };
+    const result = buildDailyPlan([a], [], 0);
+    result.futurePlan.forEach((d) => {
+      d.blocks.forEach((b) => {
+        expect(b.allocatedMinutes).toBeLessThanOrEqual(60);
+      });
+    });
+  });
+
+  it("5. 10분 단위 내림(floor) — 표시값과 차감량 일치, 10의 배수", () => {
+    // remaining=35 → floor(35/10)*10=30 배정, 나머지 5분은 unplacedWarnings
+    const a: Assignment = {
+      ...baseAssignment,
+      id: "a5",
+      dueDate: daysFromNow(2),
+      estimatedHours: 1,
+      actualMinutes: 25,  // 60-25=35 remaining
+    };
+    const result = buildDailyPlan([a], [], 0);
+    const allAllocated = result.futurePlan.flatMap((d) => d.blocks.map((b) => b.allocatedMinutes));
+    // 모든 배정값은 10의 배수
+    allAllocated.forEach((m) => {
+      expect(m % 10).toBe(0);
+    });
+    // 30분 배정 후 5분은 배치 불가 → unplacedWarnings
+    expect(result.unplacedWarnings).toHaveLength(1);
+    expect(result.unplacedWarnings[0].unplacedMinutes).toBe(5);
+  });
+
+  it("5b. 날짜별 전체 상한 180분 — 과제가 4개여도 하루 합산 180분 초과 안 됨", () => {
+    // 4개 과제, 각 60분 남음, 모두 내일 마감 → 4번째는 unplacedWarnings
+    const makeA = (id: string): Assignment => ({
+      ...baseAssignment,
+      id,
+      dueDate: daysFromNow(1),
+      estimatedHours: 1,
+      actualMinutes: 0,
+    });
+    const result = buildDailyPlan([makeA("b1"), makeA("b2"), makeA("b3"), makeA("b4")], [], 0);
+    result.futurePlan.forEach((day) => {
+      expect(day.totalMinutes).toBeLessThanOrEqual(180);
+    });
+    // 4번째 과제는 배치 불가
+    expect(result.unplacedWarnings.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("6. 시험 블록은 futurePlan에 포함되지 않는다", () => {
+    const examTomorrow: Exam = { ...baseExam, examDate: daysFromNow(1), prepDays: 5 };
+    const result = buildDailyPlan([], [examTomorrow], 0);
+    // overflow에 시험 블록이 있어도 futurePlan에는 없어야 함
+    const hasExamInFuture = result.futurePlan.some((d) =>
+      // type 정보가 없으므로 assignmentId로 판단 — 시험은 examId를 가짐
+      d.blocks.some((b) => b.assignmentId === baseExam.id)
+    );
+    expect(hasExamInFuture).toBe(false);
+    expect(result.futurePlan).toHaveLength(0);
+  });
+
+  it("7. daysLeft=0(오늘 마감) 과제는 unplacedWarnings에 기록된다", () => {
+    const a: Assignment = { ...baseAssignment, id: "a7", dueDate: daysFromNow(0) };
+    const result = buildDailyPlan([a], [], 0);
+    expect(result.unplacedWarnings).toHaveLength(1);
+    expect(result.unplacedWarnings[0].assignmentId).toBe("a7");
+  });
+
+  it("8. 남은 시간이 마감 전에 다 배치되면 unplacedWarnings 없음", () => {
+    // daysLeft=3, estimatedHours=3(180분) → 3일*60분 = 전부 배치 가능
+    const a: Assignment = { ...baseAssignment, id: "a8", dueDate: daysFromNow(3), estimatedHours: 3 };
+    const result = buildDailyPlan([a], [], 0);
+    expect(result.unplacedWarnings).toHaveLength(0);
+  });
+
+  it("9. futurePlan 날짜는 오름차순으로 정렬된다", () => {
+    const a: Assignment = { ...baseAssignment, id: "a9", dueDate: daysFromNow(4), estimatedHours: 4 };
+    const result = buildDailyPlan([a], [], 0);
+    for (let i = 1; i < result.futurePlan.length; i++) {
+      expect(result.futurePlan[i].date.getTime()).toBeGreaterThan(
+        result.futurePlan[i - 1].date.getTime()
+      );
+    }
   });
 });

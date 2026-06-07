@@ -19,6 +19,7 @@ function fromDb(row: Record<string, unknown>): Assignment {
     dueDate: parseDateOnly(row.due_date as string),
     difficulty: row.difficulty as Difficulty,
     estimatedHours: Number(row.estimated_hours),
+    actualMinutes: Number(row.actual_minutes ?? 0),
     status: row.status as AssignmentStatus,
     completedAt: row.completed_at ? new Date(row.completed_at as string) : null,
     createdAt: new Date(row.created_at as string),
@@ -128,6 +129,34 @@ export async function updateAssignmentStatus(
   revalidatePath("/calendar");
   revalidatePath("/today");
   return { error: null };
+}
+
+export async function logStudyTime(
+  id: string,
+  minutes: number
+): Promise<{ actualMinutes: number | null; error: string | null }> {
+  // 서버 검증 — 정수 1~999분
+  if (!Number.isInteger(minutes) || minutes < 1 || minutes > 999) {
+    return { actualMinutes: null, error: "1~999분 사이로 입력해주세요" };
+  }
+
+  const supabase = await createClient();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) return { actualMinutes: null, error: "로그인이 필요합니다" };
+
+  // DB에서 원자적으로 증가 후 새 값 반환
+  const { data, error } = await supabase.rpc("increment_actual_minutes", {
+    p_assignment_id: id,
+    p_add_minutes: minutes,
+  });
+
+  if (error) return { actualMinutes: null, error: error.message };
+  // data가 null이면 과제 미존재 or 범위 위반 (RPC WHERE 조건 불충족)
+  if (data === null) return { actualMinutes: null, error: "기록에 실패했습니다. 다시 시도해주세요." };
+
+  revalidatePath("/today");
+  revalidatePath("/dashboard");
+  return { actualMinutes: data as number, error: null };
 }
 
 export async function deleteAssignment(

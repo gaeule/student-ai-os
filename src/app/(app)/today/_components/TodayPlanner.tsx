@@ -16,14 +16,16 @@ import {
   Check,
   ListTodo,
   GraduationCap,
+  Timer,
+  CalendarCheck2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { buildDailyPlan, type AssignmentStudyBlock, type ExamStudyBlock, type StudyBlock, type DailyPlanResult, type OverdueAssignment } from "@/lib/studyPlan";
+import { buildDailyPlan, type AssignmentStudyBlock, type ExamStudyBlock, type StudyBlock, type DailyPlanResult, type OverdueAssignment, type FuturePlanItem, type UnplacedWarning } from "@/lib/studyPlan";
 import { calcBlockedHours } from "@/lib/scheduleUtils";
 import { getAIComment } from "@/lib/actions/ai";
-import { updateAssignmentStatus } from "@/lib/actions/assignments";
+import { updateAssignmentStatus, logStudyTime } from "@/lib/actions/assignments";
 import type { Assignment, Difficulty, Exam, Schedule } from "@/types";
 
 // ---- 상수 ----
@@ -84,20 +86,38 @@ function AICommentBox({
   );
 }
 
+const LOG_QUICK_MINUTES = [15, 30, 45, 60];
+
 // ---- 추천 카드 (과제) ----
 function RecommendCard({
   item,
   rank,
   completing,
+  logging,
   onComplete,
+  onLogTime,
 }: {
   item: AssignmentStudyBlock;
   rank: number;
   completing: boolean;
+  logging: boolean;
   onComplete: (id: string) => void;
+  onLogTime: (id: string, minutes: number) => void;
 }) {
   const diff = DIFFICULTY_CONFIG[item.difficulty];
   const isPartial = item.allocatedMinutes < item.requestedMinutes;
+  const totalMinutes = Math.round(item.estimatedHours * 60);
+  const donePercent = Math.min(100, Math.round((item.actualMinutes / totalMinutes) * 100));
+
+  const [showLogger, setShowLogger] = useState(false);
+  const [inputMinutes, setInputMinutes] = useState("");
+
+  function submitLog(minutes: number) {
+    if (minutes <= 0) return;
+    onLogTime(item.assignmentId, minutes);
+    setShowLogger(false);
+    setInputMinutes("");
+  }
 
   return (
     <div className="bg-card border-border flex gap-4 rounded-xl border p-5 shadow-sm">
@@ -119,6 +139,22 @@ function RecommendCard({
             <Badge variant="outline" className={cn("text-xs", diff.className)}>
               {diff.label}
             </Badge>
+            {/* 시간 기록 버튼 */}
+            <button
+              type="button"
+              onClick={() => setShowLogger((v) => !v)}
+              disabled={logging}
+              title="공부 시간 기록"
+              className={cn(
+                "flex h-6 w-6 items-center justify-center rounded-full border transition-colors",
+                showLogger
+                  ? "border-blue-400 bg-blue-50 text-blue-600"
+                  : "border-border text-muted-foreground hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600"
+              )}
+            >
+              <Timer className="h-3.5 w-3.5" />
+            </button>
+            {/* 완료 버튼 */}
             <button
               type="button"
               onClick={() => onComplete(item.assignmentId)}
@@ -155,6 +191,7 @@ function RecommendCard({
           </span>
         </div>
 
+        {/* 진행률 바 */}
         <div className="space-y-1">
           <div className="flex items-center justify-between text-xs">
             <span className="text-muted-foreground flex items-center gap-1">
@@ -163,22 +200,71 @@ function RecommendCard({
               <span className="text-foreground font-semibold ml-0.5">
                 {formatMinutes(item.allocatedMinutes)}
               </span>
-              <span className="text-muted-foreground">/ 총 {formatMinutes(item.requestedMinutes)}</span>
+              <span className="text-muted-foreground">/ 남은 {formatMinutes(item.requestedMinutes)}</span>
             </span>
             {isPartial && (
               <span className="text-yellow-600 text-[11px]">부분 작업</span>
             )}
           </div>
+          {/* 전체 진행률 (actualMinutes / totalMinutes) */}
           <div className="bg-muted h-1.5 w-full overflow-hidden rounded-full">
             <div
-              className={cn(
-                "h-full rounded-full transition-all",
-                isPartial ? "bg-yellow-400" : "bg-primary"
-              )}
-              style={{ width: `${(item.allocatedMinutes / item.requestedMinutes) * 100}%` }}
+              className="h-full rounded-full bg-primary transition-all"
+              style={{ width: `${donePercent}%` }}
             />
           </div>
+          {item.actualMinutes > 0 && (
+            <p className="text-[11px] text-muted-foreground">
+              누적 {formatMinutes(item.actualMinutes)} 수행 / 총 {formatMinutes(totalMinutes)} ({donePercent}%)
+            </p>
+          )}
         </div>
+
+        {/* 인라인 시간 기록 패널 */}
+        {showLogger && (
+          <div className="rounded-lg border border-blue-200 bg-blue-50/60 p-3 space-y-2">
+            <p className="text-xs font-medium text-blue-800">공부한 시간 기록</p>
+            <div className="flex flex-wrap gap-1.5">
+              {LOG_QUICK_MINUTES.map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => submitLog(m)}
+                  disabled={logging}
+                  className="rounded-full border border-blue-300 bg-white px-2.5 py-0.5 text-xs text-blue-700 hover:bg-blue-100 transition-colors disabled:opacity-50"
+                >
+                  {m}분
+                </button>
+              ))}
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="number"
+                min={1}
+                max={999}
+                placeholder="직접 입력 (분)"
+                value={inputMinutes}
+                onChange={(e) => setInputMinutes(e.target.value)}
+                className="h-7 w-28 rounded-md border border-blue-200 bg-white px-2 text-xs focus:outline-none focus:ring-1 focus:ring-blue-400"
+              />
+              <button
+                type="button"
+                onClick={() => submitLog(Number(inputMinutes))}
+                disabled={logging || !inputMinutes || Number(inputMinutes) <= 0}
+                className="h-7 rounded-md bg-blue-600 px-3 text-xs text-white hover:bg-blue-700 disabled:opacity-50 transition-colors"
+              >
+                {logging ? "저장 중…" : "저장"}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setShowLogger(false); setInputMinutes(""); }}
+                className="text-xs text-muted-foreground hover:text-foreground"
+              >
+                취소
+              </button>
+            </div>
+          </div>
+        )}
 
         {item.reasons.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
@@ -341,13 +427,13 @@ function OverflowPlan({ items }: { items: StudyBlock[] }) {
         </div>
       )}
 
-      {/* 내일 이어서 할 항목 */}
+      {/* 오늘 시간 부족 항목 */}
       {restItems.length > 0 && (
         <div className="rounded-xl border border-border bg-muted/30 p-4 space-y-3">
           <div className="flex items-center gap-2">
             <ListTodo className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-semibold text-muted-foreground">
-              오늘 시간 부족 — 내일 이어서 할 항목
+              오늘 시간 부족
             </span>
           </div>
           <div className="space-y-2">
@@ -363,14 +449,14 @@ function OverflowPlan({ items }: { items: StudyBlock[] }) {
                 <div className="shrink-0 text-right text-xs text-muted-foreground space-y-0.5">
                   {item.allocatedMinutes > 0 ? (
                     <p>
-                      오늘 {formatMinutes(item.allocatedMinutes)} · 내일{" "}
+                      오늘 {formatMinutes(item.allocatedMinutes)} ·{" "}
                       <span className="font-medium text-foreground">
                         {formatMinutes(item.remainingMinutes)}
                       </span>{" "}
                       남음
                     </p>
                   ) : (
-                    <p>{formatMinutes(item.requestedMinutes)} 필요</p>
+                    <p>{formatMinutes(item.requestedMinutes)} 남음</p>
                   )}
                   {item.type === "assignment" ? (
                     <p>{format(item.dueDate, "M/d (E)", { locale: ko })} 마감</p>
@@ -381,9 +467,6 @@ function OverflowPlan({ items }: { items: StudyBlock[] }) {
               </div>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground pl-1">
-            내일 다시 추천받으면 위 항목이 우선순위에 반영됩니다.
-          </p>
         </div>
       )}
     </div>
@@ -428,6 +511,99 @@ function OverduePlan({ items }: { items: OverdueAssignment[] }) {
   );
 }
 
+// ---- 못 끝낸 과제 자동 재배치 ----
+function FuturePlan({
+  futurePlan,
+  unplacedWarnings,
+}: {
+  futurePlan: FuturePlanItem[];
+  unplacedWarnings: UnplacedWarning[];
+}) {
+  if (futurePlan.length === 0 && unplacedWarnings.length === 0) return null;
+
+  return (
+    <div className="rounded-xl border border-blue-200 bg-blue-50/40 p-4 space-y-4">
+      <div className="flex items-center gap-2">
+        <CalendarCheck2 className="h-4 w-4 text-blue-600" />
+        <span className="text-sm font-semibold text-blue-800">앞으로의 학습 일정</span>
+        <span className="text-xs text-blue-500">오늘 못 끝낸 과제 자동 배치</span>
+      </div>
+
+      {/* 날짜별 배치 */}
+      {futurePlan.length > 0 && (
+        <div className="space-y-3">
+          {futurePlan.map((day) => (
+            <div key={day.dateStr} className="space-y-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-blue-700">
+                  {format(day.date, "M월 d일 (E)", { locale: ko })}
+                </span>
+                <span className="text-[11px] text-blue-500">
+                  · 총 {formatMinutes(day.totalMinutes)}
+                </span>
+              </div>
+              <div className="space-y-1">
+                {day.blocks.map((block) => (
+                  <div
+                    key={block.assignmentId}
+                    className="flex items-center justify-between gap-3 rounded-lg bg-white border border-blue-100 px-3 py-2"
+                  >
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-foreground truncate">{block.title}</p>
+                      {block.subjectName && (
+                        <p className="text-[11px] text-muted-foreground">{block.subjectName}</p>
+                      )}
+                    </div>
+                    <div className="shrink-0 text-right space-y-0.5">
+                      <p className="text-xs font-semibold text-blue-700">
+                        {formatMinutes(block.allocatedMinutes)}
+                      </p>
+                      <p className="text-[11px] text-muted-foreground">
+                        {format(block.dueDate, "M/d (E)", { locale: ko })} 마감
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* 배치 못한 시간 경고 */}
+      {unplacedWarnings.length > 0 && (
+        <div className="rounded-lg border border-orange-200 bg-orange-50/70 p-3 space-y-2">
+          <div className="flex items-center gap-1.5">
+            <AlertCircle className="h-3.5 w-3.5 text-orange-500" />
+            <span className="text-xs font-semibold text-orange-700">마감 전 배치 불가 — 일정 조정 필요</span>
+          </div>
+          <div className="space-y-1">
+            {unplacedWarnings.map((w) => (
+              <div
+                key={w.assignmentId}
+                className="flex items-center justify-between gap-3 rounded-md bg-white border border-orange-200 px-3 py-2"
+              >
+                <p className="text-sm font-medium text-foreground truncate">{w.title}</p>
+                <div className="shrink-0 text-right space-y-0.5">
+                  <p className="text-xs font-semibold text-orange-600">
+                    {formatMinutes(w.unplacedMinutes)} 배치 불가
+                  </p>
+                  <p className="text-[11px] text-muted-foreground">
+                    {format(w.dueDate, "M/d (E)", { locale: ko })} 마감
+                  </p>
+                </div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[11px] text-orange-600 pl-0.5">
+            가용 시간을 늘리거나 마감 기한을 교수님께 확인하세요.
+          </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---- 메인 컴포넌트 ----
 export function TodayPlanner({
   assignments,
@@ -447,32 +623,46 @@ export function TodayPlanner({
   const [aiLoading, setAiLoading] = useState(false);
   const [aiError, setAiError] = useState<string | null>(null);
   const [completingId, setCompletingId] = useState<string | null>(null);
+  const [loggingId, setLoggingId] = useState<string | null>(null);
+  const [logError, setLogError] = useState<string | null>(null);
+  // 로컬 assignments 상태 — logStudyTime 후 즉시 재계산을 위해 유지
+  const [localAssignments, setLocalAssignments] = useState(assignments);
+  // 오늘 수행한 시간 (분) — 가용 시간에서 차감
+  // MVP 한계: React 상태에만 존재하므로 새로고침 시 0으로 초기화됨.
+  // 새로고침 후에도 정확하려면 날짜별 수행 기록(study_sessions 테이블)이 필요.
+  const [loggedMinutesToday, setLoggedMinutesToday] = useState(0);
   // AI 요청 race condition 방지: 최신 요청 ID만 결과 반영
   const aiRequestId = useRef(0);
 
-  const todo = assignments.filter((a) => a.status !== "done");
+  const todo = localAssignments.filter((a) => a.status !== "done");
 
-  const availableHours = Math.max(0, Number(hours || 0) - blockedHours);
+  // 가용 시간 = 입력값 - 고정 일정 - 오늘 이미 수행한 시간
+  const availableHours = Math.max(0, Number(hours || 0) - blockedHours - loggedMinutesToday / 60);
 
-  // 실제 복습 블록을 생성할 수 있는 시험이 존재하는지 확인
-  const todayMidnight = new Date();
-  todayMidnight.setHours(0, 0, 0, 0);
+  // 실제 복습 블록을 생성할 수 있는 시험이 존재하는지 확인 (KST 기준)
+  const kstTodayStr = new Intl.DateTimeFormat("sv", { timeZone: "Asia/Seoul" }).format(new Date());
+  const [kty, ktm, ktd] = kstTodayStr.split("-").map(Number);
+  const todayMidnight = new Date(kty, ktm - 1, ktd);
   const hasSchedulableExam = exams.some((e) => {
     const d = differenceInDays(e.examDate, todayMidnight);
     return d >= 0 && d <= e.prepDays;
   });
 
+  const hasTodo = todo.length > 0 || hasSchedulableExam;
+
   function handleComplete(id: string) {
     setCompletingId(id);
-    // 진행 중인 AI 요청 무효화 + 로딩 즉시 해제
     aiRequestId.current++;
     setAiLoading(false);
     startTransition(async () => {
       const { error } = await updateAssignmentStatus(id, "done");
       if (!error) {
-        // 완료된 과제 즉시 제외하고 재계산 (props 기반 — router.refresh() 전까지 서버와 잠깐 차이 날 수 있으나 허용 범위)
-        const remaining = assignments.filter((a) => a.id !== id && a.status !== "done");
-        setResult(buildDailyPlan(remaining, exams, availableHours));
+        const updated = localAssignments.map((a) =>
+          a.id === id ? { ...a, status: "done" as const } : a
+        );
+        setLocalAssignments(updated);
+        const currentAvailableHours = Math.max(0, Number(hours || 0) - blockedHours - loggedMinutesToday / 60);
+        setResult(buildDailyPlan(updated.filter((a) => a.status !== "done"), exams, currentAvailableHours));
         setAiComment(null);
         setAiError(null);
         router.refresh();
@@ -481,11 +671,40 @@ export function TodayPlanner({
     });
   }
 
+  function handleLogTime(id: string, minutes: number) {
+    setLoggingId(id);
+    setLogError(null);
+    // 진행 중인 AI 응답 무효화
+    aiRequestId.current++;
+    setAiLoading(false);
+    setAiComment(null);
+    setAiError(null);
+    startTransition(async () => {
+      const { actualMinutes: newActualMinutes, error } = await logStudyTime(id, minutes);
+      if (!error && newActualMinutes !== null) {
+        // 수행 시간만큼 오늘 가용 시간 차감 (클로저 문제 방지: 지역 변수로 계산)
+        const newLogged = loggedMinutesToday + minutes;
+        setLoggedMinutesToday(newLogged);
+        const updatedAvailableHours = Math.max(0, Number(hours || 0) - blockedHours - newLogged / 60);
+        // DB 반환값으로 상태 갱신 (추정값 사용 안 함)
+        const updated = localAssignments.map((a) =>
+          a.id === id ? { ...a, actualMinutes: newActualMinutes } : a
+        );
+        setLocalAssignments(updated);
+        setResult(buildDailyPlan(updated.filter((a) => a.status !== "done"), exams, updatedAvailableHours));
+        router.refresh();
+      } else if (error) {
+        setLogError(error);
+      }
+      setLoggingId(null);
+    });
+  }
+
   const handleRecommend = async () => {
     if (!hours || Number(hours) <= 0) return;
 
-    // 1. 로컬 알고리즘 즉시 실행 (고정 일정 차감 후 가용 시간 기준)
-    const recommendations = buildDailyPlan(assignments, exams, availableHours);
+    // 1. 로컬 알고리즘 즉시 실행 — 이미 수행한 시간 차감 유지
+    const recommendations = buildDailyPlan(localAssignments.filter((a) => a.status !== "done"), exams, availableHours);
     setResult(recommendations);
 
     // 2. AI 코멘트 비동기 요청 — 요청 ID 채번
@@ -495,7 +714,7 @@ export function TodayPlanner({
     setAiLoading(true);
 
     try {
-      const { comment, error } = await getAIComment(recommendations.scheduled, availableHours);
+      const { comment, error } = await getAIComment(recommendations.scheduled, availableHours); // availableHours = 계획 계산과 동일한 값
       // 완료 처리 등으로 더 최신 요청이 생겼으면 이 응답은 버림
       if (aiRequestId.current === reqId) {
         setAiComment(comment);
@@ -580,17 +799,32 @@ export function TodayPlanner({
         )}
         <Button
           onClick={handleRecommend}
-          disabled={!hours || Number(hours) <= 0 || availableHours === 0 || (todo.length === 0 && !hasSchedulableExam) || aiLoading}
+          disabled={!hours || Number(hours) <= 0 || availableHours === 0 || !hasTodo || aiLoading}
           className="w-full gap-2"
         >
           <Sparkles className="h-4 w-4" />
-          {todo.length === 0 && !hasSchedulableExam
+          {!hasTodo
             ? "등록된 과제·시험 없음"
             : aiLoading
             ? "AI 분석 중..."
             : "오늘 할 일 추천받기"}
         </Button>
       </div>
+
+      {/* 시간 기록 오류 */}
+      {logError && (
+        <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <AlertCircle className="h-4 w-4 shrink-0" />
+          <span>{logError}</span>
+          <button
+            type="button"
+            onClick={() => setLogError(null)}
+            className="ml-auto text-red-400 hover:text-red-600 text-xs"
+          >
+            닫기
+          </button>
+        </div>
+      )}
 
       {/* 추천 결과 */}
       {result !== null && (
@@ -623,7 +857,9 @@ export function TodayPlanner({
                       item={item}
                       rank={i + 1}
                       completing={completingId === item.assignmentId}
+                      logging={loggingId === item.assignmentId}
                       onComplete={handleComplete}
+                      onLogTime={handleLogTime}
                     />
                   ) : (
                     <ExamStudyCard
@@ -640,6 +876,14 @@ export function TodayPlanner({
           {/* 오늘 시간 부족 과제 */}
           {result.overflow.length > 0 && (
             <OverflowPlan items={result.overflow} />
+          )}
+
+          {/* 못 끝낸 과제 자동 재배치 */}
+          {(result.futurePlan.length > 0 || result.unplacedWarnings.length > 0) && (
+            <FuturePlan
+              futurePlan={result.futurePlan}
+              unplacedWarnings={result.unplacedWarnings}
+            />
           )}
 
           {/* 마감 초과 — 별도 확인 필요 */}

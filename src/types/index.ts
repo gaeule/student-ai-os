@@ -55,6 +55,7 @@ export type Assignment = {
   dueDate: Date;
   difficulty: Difficulty;
   estimatedHours: number;
+  actualMinutes: number;   // 누적 실제 수행 시간 (분)
   status: AssignmentStatus;
   completedAt: Date | null;
   createdAt: Date;
